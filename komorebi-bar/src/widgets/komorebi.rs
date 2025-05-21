@@ -856,6 +856,96 @@ impl KomorebiNotificationState {
 }
 
 #[derive(Clone, Debug)]
+pub struct ContainerInformation {
+    pub windows: Vec<WindowInfo>,
+    pub focused_window_idx: usize,
+    pub is_focused: bool,
+    pub is_locked: bool,
+}
+
+#[derive(Clone, Debug)]
+pub struct WindowInfo {
+    pub title: String,
+    pub icon: Option<ImageIcon>,
+}
+
+impl ContainerInformation {
+    pub const EMPTY: Self = Self {
+        windows: vec![],
+        focused_window_idx: 0,
+        is_focused: false,
+        is_locked: false,
+    };
+
+    pub fn from_workspace(ws: &Workspace, show_all_icons: bool) -> Vec<Self> {
+        let mut containers = vec![];
+        let mut has_monocle = false;
+
+        if show_all_icons {
+            if let Some(container) = ws.monocle_container() {
+                containers.push(Self::from_container(container, true));
+                has_monocle = true;
+            }
+            for (i, container) in ws.containers().iter().enumerate() {
+                let is_focused = !has_monocle && i == ws.focused_container_idx();
+                containers.push(Self::from_container(container, is_focused));
+            }
+            for floating_window in ws.floating_windows() {
+                let is_focused = !has_monocle && floating_window.is_focused();
+                containers.push(Self::from_window(floating_window, is_focused, false));
+            }
+        } else {
+            let mut container_info = Self::EMPTY;
+
+            if let Some(container) = ws.monocle_container() {
+                container_info = Self::from_container(container, true);
+            } else if let Some(container) = ws.focused_container() {
+                container_info = Self::from_container(container, true);
+            }
+
+            for floating_window in ws.floating_windows() {
+                if floating_window.is_focused() {
+                    container_info = Self::from_window(floating_window, true, false);
+                }
+            }
+
+            containers.push(container_info);
+        }
+        containers
+    }
+
+    pub fn from_container(container: &Container, is_focused: bool) -> Self {
+        Self {
+            windows: container.windows().iter().map(Into::into).collect(),
+            focused_window_idx: container.focused_window_idx(),
+            is_focused,
+            is_locked: container.locked(),
+        }
+    }
+
+    pub fn from_window(window: &Window, is_focused: bool, is_locked: bool) -> Self {
+        Self {
+            windows: vec![window.into()],
+            focused_window_idx: 0,
+            is_focused,
+            is_locked,
+        }
+    }
+}
+
+impl From<&Window> for WindowInfo {
+    fn from(value: &Window) -> Self {
+        Self {
+            title: value.title().unwrap_or_default(),
+            icon: ImageIcon::try_load(value.hwnd, || {
+                windows_icons::get_icon_by_hwnd(value.hwnd)
+                    .or_else(|| windows_icons_fallback::get_icon_by_process_id(value.process_id()))
+            }),
+        }
+    }
+}
+
+#[derive(Clone, Debug)]
 pub struct KomorebiNotificationStateContainerInformation {
     pub titles: Vec<String>,
     pub icons: Vec<Option<ImageIcon>>,
