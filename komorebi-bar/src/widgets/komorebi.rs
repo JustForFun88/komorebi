@@ -858,22 +858,17 @@ impl KomorebiNotificationState {
 #[derive(Clone, Debug)]
 pub struct KomorebiNotificationStateNew {
     pub workspaces: Vec<WorkspaceInformation>,
-    pub focused_workspace_idx: usize,
     pub focused_container_information: ContainerInformation,
     pub layout: KomorebiLayout,
-    pub hide_empty_workspaces: bool,
     pub mouse_follows_focus: bool,
     pub work_area_offset: Option<Rect>,
     pub stack_accent: Option<Color32>,
     pub monitor_index: usize,
     pub monitor_usr_idx_map: HashMap<usize, usize>,
+    pub workspaces_context: WorkspacesContext,
 }
 
 impl KomorebiNotificationStateNew {
-    pub fn update_from_config(&mut self, config: &Self) {
-        self.hide_empty_workspaces = config.hide_empty_workspaces;
-    }
-
     #[allow(clippy::too_many_arguments)]
     pub fn handle_notification(
         &mut self,
@@ -950,16 +945,14 @@ impl KomorebiNotificationStateNew {
 
         let monitor = &monitors.elements()[monitor_index];
         self.work_area_offset = monitor.work_area_offset();
-        self.focused_workspace_idx = monitor.focused_workspace_idx();
+        self.workspaces_context.focused_idx = monitor.focused_workspace_idx();
+        self.workspaces_context.show_all_icons = show_all_icons;
 
-        self.workspaces = WorkspacesContext::new(
-            self.focused_workspace_idx,
-            show_all_icons,
-            self.hide_empty_workspaces,
-        )
-        .build_workspaces(monitor.workspaces().iter().enumerate());
+        self.workspaces = self
+            .workspaces_context
+            .build_workspaces(monitor.workspaces().iter().enumerate());
 
-        let focused_ws = &monitor.workspaces()[self.focused_workspace_idx];
+        let focused_ws = &monitor.workspaces()[self.workspaces_context.focused_idx];
         // Layout
         self.layout = if focused_ws.monocle_container().is_some() {
             KomorebiLayout::Monocle
@@ -989,6 +982,7 @@ pub struct WorkspaceInformation {
     pub is_selected: bool,
 }
 
+#[derive(Clone, Debug)]
 pub struct WorkspacesContext {
     pub focused_idx: usize,
     pub show_all_icons: bool,
