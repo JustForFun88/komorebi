@@ -865,7 +865,9 @@ pub struct MonitorInfo {
     pub stack_accent: Option<Color32>,
     pub monitor_index: usize,
     pub monitor_usr_idx_map: HashMap<usize, usize>,
-    pub workspaces_context: WorkspacesContext,
+    pub focused_workspace_idx: usize,
+    pub show_all_icons: bool,
+    pub hide_empty_workspaces: bool,
 }
 
 impl MonitorInfo {
@@ -882,7 +884,7 @@ impl MonitorInfo {
         default_theme: Option<KomobarTheme>,
         render_config: Rc<RefCell<RenderConfig>>,
     ) {
-        let show_all_icons = render_config.borrow().show_all_icons;
+        self.show_all_icons = render_config.borrow().show_all_icons;
 
         if let NotificationEvent::Socket(message) = notification.event {
             match message {
@@ -945,14 +947,11 @@ impl MonitorInfo {
 
         let monitor = &monitors.elements()[monitor_index];
         self.work_area_offset = monitor.work_area_offset();
-        self.workspaces_context.focused_idx = monitor.focused_workspace_idx();
-        self.workspaces_context.show_all_icons = show_all_icons;
+        self.focused_workspace_idx = monitor.focused_workspace_idx();
 
-        self.workspaces = self
-            .workspaces_context
-            .build_workspaces(monitor.workspaces().iter().enumerate());
+        self.workspaces = self.build_workspaces(monitor.workspaces().iter().enumerate());
 
-        let focused_ws = &monitor.workspaces()[self.workspaces_context.focused_idx];
+        let focused_ws = &monitor.workspaces()[self.focused_workspace_idx];
         // Layout
         self.layout = if focused_ws.monocle_container().is_some() {
             KomorebiLayout::Monocle
@@ -970,6 +969,43 @@ impl MonitorInfo {
         // Focused container information
         self.focused_container_information = ContainerInfo::from_focused_workspace(focused_ws);
     }
+
+    fn build_workspaces<'a, I>(&self, iter: I) -> Vec<WorkspaceInfo>
+    where
+        I: Iterator<Item = (usize, &'a Workspace)>,
+    {
+        let iter = iter.map(|(index, ws)| {
+            let containers = if self.show_all_icons {
+                ContainerInfo::from_workspace(ws)
+            } else {
+                vec![ContainerInfo::from_focused_workspace(ws)]
+            };
+            let focused_container_idx = containers
+                .iter()
+                .rposition(|container| container.is_focused)
+                .unwrap_or(0);
+            WorkspaceInfo {
+                name: ws
+                    .name()
+                    .to_owned()
+                    .unwrap_or_else(|| format!("{}", index + 1)),
+                containers,
+                focused_container_idx,
+                layer: *ws.layer(),
+                should_show: !self.hide_empty_workspaces
+                    || self.focused_workspace_idx == index
+                    || !ws.is_empty(),
+                is_selected: self.focused_workspace_idx == index,
+            }
+        });
+        iter.collect()
+    }
+}
+
+fn find_focused_container_index(containers: &[ContainerInfo]) -> Option<usize> {
+    containers
+        .iter()
+        .rposition(|container| container.is_focused)
 }
 
 #[derive(Clone, Debug)]
@@ -983,60 +1019,11 @@ pub struct WorkspaceInfo {
 }
 
 #[derive(Clone, Debug)]
-pub struct WorkspacesContext {
-    pub focused_idx: usize,
-    pub show_all_icons: bool,
-    pub hide_empty: bool,
-}
-
-impl WorkspacesContext {
-    fn new(focused_idx: usize, show_all_icons: bool, hide_empty: bool) -> Self {
-        Self {
-            focused_idx,
-            show_all_icons,
-            hide_empty,
-        }
-    }
-
-    pub fn build_workspaces<'a, I>(&self, iter: I) -> Vec<WorkspaceInfo>
-    where
-        I: Iterator<Item = (usize, &'a Workspace)>,
-    {
-        iter.map(|(index, ws)| {
-            let name = ws
-                .name()
-                .to_owned()
-                .unwrap_or_else(|| format!("{}", index + 1));
-            let (focused_container_idx, containers) = if self.show_all_icons {
-                ContainerInfo::from_workspace(ws)
-            } else {
-                (0, vec![ContainerInfo::from_focused_workspace(ws)])
-            };
-            WorkspaceInfo {
-                name,
-                containers,
-                focused_container_idx,
-                layer: ws.layer().to_owned(),
-                should_show: !self.hide_empty || self.focused_idx == index || !ws.is_empty(),
-                is_selected: self.focused_idx == index,
-            }
-        })
-        .collect()
-    }
-}
-
-#[derive(Clone, Debug)]
 pub struct ContainerInfo {
     pub windows: Vec<WindowInfo>,
     pub focused_window_idx: usize,
     pub is_focused: bool,
     pub is_locked: bool,
-}
-
-#[derive(Clone, Debug)]
-pub struct WindowInfo {
-    pub title: String,
-    pub icon: Option<ImageIcon>,
 }
 
 impl ContainerInfo {
@@ -1047,32 +1034,24 @@ impl ContainerInfo {
         is_locked: false,
     };
 
-    pub fn from_workspace(ws: &Workspace) -> (usize, Vec<Self>) {
+    pub fn from_workspace(ws: &Workspace) -> Vec<Self> {
         let mut containers = Vec::with_capacity(ws.containers().len());
-        let mut has_monocle = false;
-        let mut focused_container_idx = 0;
         // add monocle container
         if let Some(container) = ws.monocle_container() {
             containers.push(Self::from_container(container, true));
-            has_monocle = true;
         }
+        let has_monocle = ws.monocle_container().is_some();
         // add all tiled windows
         for (i, container) in ws.containers().iter().enumerate() {
             let is_focused = !has_monocle && i == ws.focused_container_idx();
             containers.push(Self::from_container(container, is_focused));
-            if is_focused {
-                focused_container_idx = containers.len() - 1
-            }
         }
         // add all floating windows
         for floating_window in ws.floating_windows() {
             let is_focused = !has_monocle && floating_window.is_focused();
             containers.push(Self::from_window(floating_window, is_focused, false));
-            if is_focused {
-                focused_container_idx = containers.len() - 1
-            }
         }
-        (focused_container_idx, containers)
+        containers
     }
 
     pub fn from_focused_workspace(ws: &Workspace) -> Self {
@@ -1105,6 +1084,12 @@ impl ContainerInfo {
             is_locked,
         }
     }
+}
+
+#[derive(Clone, Debug)]
+pub struct WindowInfo {
+    pub title: String,
+    pub icon: Option<ImageIcon>,
 }
 
 impl From<&Window> for WindowInfo {
