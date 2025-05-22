@@ -856,6 +856,183 @@ impl KomorebiNotificationState {
 }
 
 #[derive(Clone, Debug)]
+pub struct KomorebiNotificationStateNew {
+    pub workspaces: Vec<WorkspaceInformation>,
+    pub selected_workspace: String,
+    pub focused_container_information: ContainerInformation,
+    pub layout: KomorebiLayout,
+    pub hide_empty_workspaces: bool,
+    pub mouse_follows_focus: bool,
+    pub work_area_offset: Option<Rect>,
+    pub stack_accent: Option<Color32>,
+    pub monitor_index: usize,
+    pub monitor_usr_idx_map: HashMap<usize, usize>,
+}
+
+impl KomorebiNotificationStateNew {
+    pub fn update_from_config(&mut self, config: &Self) {
+        self.hide_empty_workspaces = config.hide_empty_workspaces;
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub fn handle_notification(
+        &mut self,
+        ctx: &Context,
+        monitor_index: Option<usize>,
+        notification: komorebi_client::Notification,
+        bg_color: Rc<RefCell<Color32>>,
+        bg_color_with_alpha: Rc<RefCell<Color32>>,
+        transparency_alpha: Option<u8>,
+        grouping: Option<Grouping>,
+        default_theme: Option<KomobarTheme>,
+        render_config: Rc<RefCell<RenderConfig>>,
+    ) {
+        let show_all_icons = render_config.borrow().show_all_icons;
+
+        if let NotificationEvent::Socket(message) = notification.event {
+            match message {
+                SocketMessage::ReloadStaticConfiguration(path) => {
+                    if let Ok(config) = komorebi_client::StaticConfig::read(&path) {
+                        if let Some(theme) = config.theme {
+                            apply_theme(
+                                ctx,
+                                KomobarTheme::from(theme),
+                                bg_color.clone(),
+                                bg_color_with_alpha.clone(),
+                                transparency_alpha,
+                                grouping,
+                                render_config,
+                            );
+                            tracing::info!("applied theme from updated komorebi.json");
+                        } else if let Some(default_theme) = default_theme {
+                            apply_theme(
+                                ctx,
+                                default_theme,
+                                bg_color.clone(),
+                                bg_color_with_alpha.clone(),
+                                transparency_alpha,
+                                grouping,
+                                render_config,
+                            );
+                            tracing::info!("removed theme from updated komorebi.json and applied default theme");
+                        } else {
+                            tracing::warn!("theme was removed from updated komorebi.json but there was no default theme to apply");
+                        }
+                    }
+                }
+                SocketMessage::Theme(theme) => {
+                    apply_theme(
+                        ctx,
+                        KomobarTheme::from(*theme),
+                        bg_color,
+                        bg_color_with_alpha.clone(),
+                        transparency_alpha,
+                        grouping,
+                        render_config,
+                    );
+                    tracing::info!("applied theme from komorebi socket message");
+                }
+                _ => {}
+            }
+        }
+
+        self.monitor_usr_idx_map = notification.state.monitor_usr_idx_map.clone();
+
+        if monitor_index.is_none()
+            || monitor_index.is_some_and(|idx| idx >= notification.state.monitors.elements().len())
+        {
+            // The bar's monitor is diconnected, so the bar is disabled no need to check anything
+            // any further otherwise we'll get `OutOfBounds` panics.
+            return;
+        }
+        let monitor_index = monitor_index.expect("should have a monitor index");
+        self.monitor_index = monitor_index;
+
+        self.mouse_follows_focus = notification.state.mouse_follows_focus;
+
+        let monitor = &notification.state.monitors.elements()[monitor_index];
+        self.work_area_offset =
+            notification.state.monitors.elements()[monitor_index].work_area_offset();
+
+        let focused_workspace_idx = monitor.focused_workspace_idx();
+
+        let mut workspaces = vec![];
+
+        self.selected_workspace = monitor.workspaces()[focused_workspace_idx]
+            .name()
+            .to_owned()
+            .unwrap_or_else(|| format!("{}", focused_workspace_idx + 1));
+
+        for (i, ws) in monitor.workspaces().iter().enumerate() {
+            let should_show = if self.hide_empty_workspaces {
+                focused_workspace_idx == i || !ws.is_empty()
+            } else {
+                true
+            };
+
+            let name = ws.name().to_owned().unwrap_or_else(|| format!("{}", i + 1));
+            let containers = if show_all_icons {
+                ContainerInformation::from_workspace(ws)
+            } else {
+                vec![ContainerInformation::from_focused_workspace(ws)]
+            };
+            workspaces.push(WorkspaceInformation::new(
+                name,
+                containers,
+                ws.layer().to_owned(),
+                should_show,
+            ))
+        }
+
+        self.workspaces = workspaces;
+
+        if monitor.workspaces()[focused_workspace_idx]
+            .monocle_container()
+            .is_some()
+        {
+            self.layout = KomorebiLayout::Monocle;
+        } else if !*monitor.workspaces()[focused_workspace_idx].tile() {
+            self.layout = KomorebiLayout::Floating;
+        } else if notification.state.is_paused {
+            self.layout = KomorebiLayout::Paused;
+        } else {
+            self.layout = match monitor.workspaces()[focused_workspace_idx].layout() {
+                komorebi_client::Layout::Default(layout) => KomorebiLayout::Default(*layout),
+                komorebi_client::Layout::Custom(_) => KomorebiLayout::Custom,
+            };
+        }
+
+        self.focused_container_information = ContainerInformation::from_focused_workspace(
+            &monitor.workspaces()[focused_workspace_idx],
+        )
+    }
+}
+
+#[derive(Clone, Debug)]
+pub struct WorkspaceInformation {
+    pub name: String,
+    pub containers: Vec<ContainerInformation>,
+    pub layer: WorkspaceLayer,
+    pub should_show: bool,
+}
+
+impl WorkspaceInformation {
+    fn new(
+        name: String,
+        containers: Vec<ContainerInformation>,
+        layer: WorkspaceLayer,
+        should_show: bool,
+    ) -> Self {
+        Self {
+            name,
+            containers,
+            layer,
+            should_show,
+        }
+    }
+}
+
+#[derive(Clone, Debug)]
 pub struct ContainerInformation {
     pub windows: Vec<WindowInfo>,
     pub focused_window_idx: usize,
@@ -877,46 +1054,41 @@ impl ContainerInformation {
         is_locked: false,
     };
 
-    pub fn from_workspace(ws: &Workspace, show_all_icons: bool) -> Vec<Self> {
-        let mut containers = vec![];
+    pub fn from_workspace(ws: &Workspace) -> Vec<Self> {
+        let mut containers = Vec::with_capacity(ws.containers().len());
         let mut has_monocle = false;
 
-        if show_all_icons {
-            if let Some(container) = ws.monocle_container() {
-                containers.push(Self::from_container(container, true));
-                has_monocle = true;
-            }
-            for (i, container) in ws.containers().iter().enumerate() {
-                let is_focused = !has_monocle && i == ws.focused_container_idx();
-                containers.push(Self::from_container(container, is_focused));
-            }
-            for floating_window in ws.floating_windows() {
-                let is_focused = !has_monocle && floating_window.is_focused();
-                containers.push(Self::from_window(floating_window, is_focused, false));
-            }
-        } else {
-            let mut container_info = Self::EMPTY;
-
-            if let Some(container) = ws.monocle_container() {
-                container_info = Self::from_container(container, true);
-            } else if let Some(container) = ws.focused_container() {
-                container_info = Self::from_container(container, true);
-            }
-
-            for floating_window in ws.floating_windows() {
-                if floating_window.is_focused() {
-                    container_info = Self::from_window(floating_window, true, false);
-                }
-            }
-
-            containers.push(container_info);
+        if let Some(container) = ws.monocle_container() {
+            containers.push(Self::from_container(container, true));
+            has_monocle = true;
+        }
+        for (i, container) in ws.containers().iter().enumerate() {
+            let is_focused = !has_monocle && i == ws.focused_container_idx();
+            containers.push(Self::from_container(container, is_focused));
+        }
+        for floating_window in ws.floating_windows() {
+            let is_focused = !has_monocle && floating_window.is_focused();
+            containers.push(Self::from_window(floating_window, is_focused, false));
         }
         containers
     }
 
+    pub fn from_focused_workspace(ws: &Workspace) -> Self {
+        if let Some(window) = ws.floating_windows().iter().find(|w| w.is_focused()) {
+            return Self::from_window(window, true, false);
+        }
+        if let Some(container) = ws.monocle_container() {
+            Self::from_container(container, true)
+        } else if let Some(container) = ws.focused_container() {
+            Self::from_container(container, true)
+        } else {
+            Self::EMPTY
+        }
+    }
+
     pub fn from_container(container: &Container, is_focused: bool) -> Self {
         Self {
-            windows: container.windows().iter().map(Into::into).collect(),
+            windows: container.windows().iter().map(WindowInfo::from).collect(),
             focused_window_idx: container.focused_window_idx(),
             is_focused,
             is_locked: container.locked(),
