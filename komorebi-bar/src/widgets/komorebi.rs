@@ -938,73 +938,71 @@ impl KomorebiNotificationStateNew {
 
         self.monitor_usr_idx_map = notification.state.monitor_usr_idx_map.clone();
 
-        if monitor_index.is_none()
-            || monitor_index.is_some_and(|idx| idx >= notification.state.monitors.elements().len())
-        {
+        let monitors = &notification.state.monitors;
+        let monitor_index = match monitor_index {
+            Some(idx) if idx < monitors.elements().len() => idx,
             // The bar's monitor is diconnected, so the bar is disabled no need to check anything
             // any further otherwise we'll get `OutOfBounds` panics.
-            return;
-        }
-        let monitor_index = monitor_index.expect("should have a monitor index");
+            _ => return,
+        };
         self.monitor_index = monitor_index;
-
         self.mouse_follows_focus = notification.state.mouse_follows_focus;
 
-        let monitor = &notification.state.monitors.elements()[monitor_index];
-        self.work_area_offset =
-            notification.state.monitors.elements()[monitor_index].work_area_offset();
+        let monitor = &monitors.elements()[monitor_index];
+        self.work_area_offset = monitor.work_area_offset();
 
         let focused_workspace_idx = monitor.focused_workspace_idx();
+        let focused_ws = &monitor.workspaces()[focused_workspace_idx];
 
-        let mut workspaces = vec![];
-
-        self.selected_workspace = monitor.workspaces()[focused_workspace_idx]
+        self.selected_workspace = focused_ws
             .name()
             .to_owned()
             .unwrap_or_else(|| format!("{}", focused_workspace_idx + 1));
 
-        for (i, ws) in monitor.workspaces().iter().enumerate() {
-            let should_show = if self.hide_empty_workspaces {
-                focused_workspace_idx == i || !ws.is_empty()
-            } else {
-                true
-            };
+        // Build workspaces
+        self.workspaces = monitor
+            .workspaces()
+            .iter()
+            .enumerate()
+            .map(|(i, ws)| {
+                let should_show = if self.hide_empty_workspaces {
+                    focused_workspace_idx == i || !ws.is_empty()
+                } else {
+                    true
+                };
+                let name = ws.name().to_owned().unwrap_or_else(|| format!("{}", i + 1));
+                let containers = if show_all_icons {
+                    ContainerInformation::from_workspace(ws)
+                } else {
+                    vec![ContainerInformation::from_focused_workspace(ws)]
+                };
+                WorkspaceInformation::new(
+                    name,
+                    containers,
+                    ws.layer().to_owned(),
+                    should_show,
+                    focused_workspace_idx == i,
+                )
+            })
+            .collect();
 
-            let name = ws.name().to_owned().unwrap_or_else(|| format!("{}", i + 1));
-            let containers = if show_all_icons {
-                ContainerInformation::from_workspace(ws)
-            } else {
-                vec![ContainerInformation::from_focused_workspace(ws)]
-            };
-            workspaces.push(WorkspaceInformation::new(
-                name,
-                containers,
-                ws.layer().to_owned(),
-                should_show,
-            ))
-        }
-
-        self.workspaces = workspaces;
-
-        if monitor.workspaces()[focused_workspace_idx]
-            .monocle_container()
-            .is_some()
-        {
-            self.layout = KomorebiLayout::Monocle;
-        } else if !*monitor.workspaces()[focused_workspace_idx].tile() {
-            self.layout = KomorebiLayout::Floating;
+        // Layout
+        self.layout = if focused_ws.monocle_container().is_some() {
+            KomorebiLayout::Monocle
+        } else if !*focused_ws.tile() {
+            KomorebiLayout::Floating
         } else if notification.state.is_paused {
-            self.layout = KomorebiLayout::Paused;
+            KomorebiLayout::Paused
         } else {
-            self.layout = match monitor.workspaces()[focused_workspace_idx].layout() {
+            match focused_ws.layout() {
                 komorebi_client::Layout::Default(layout) => KomorebiLayout::Default(*layout),
                 komorebi_client::Layout::Custom(_) => KomorebiLayout::Custom,
-            };
-        }
+            }
+        };
 
-        self.focused_container_information = ContainerInformation::from_focused_workspace(
-            &monitor.workspaces()[focused_workspace_idx],
-        )
+        // Focused container information
+        self.focused_container_information =
+            ContainerInformation::from_focused_workspace(focused_ws);
     }
 }
 
@@ -1014,7 +1012,39 @@ pub struct WorkspaceInformation {
     pub containers: Vec<ContainerInformation>,
     pub layer: WorkspaceLayer,
     pub should_show: bool,
+    pub is_selected: bool,
 }
+
+pub struct WorkspaceContext {
+    pub focused_workspace_idx: usize,
+    pub show_all_icons: bool,
+    pub hide_empty_workspaces: bool,
+}
+
+impl WorkspaceContext {
+    pub fn build_workspace(&self, ws: &Workspace, index: usize) -> WorkspaceInformation {
+        let should_show = if self.hide_empty_workspaces {
+            self.focused_workspace_idx == index || !ws.is_empty()
+        } else {
+            true
+        };
+        let name = ws.name().to_owned().unwrap_or_else(|| format!("{}", index + 1));
+        let containers = if self.show_all_icons {
+            ContainerInformation::from_workspace(ws)
+        } else {
+            vec![ContainerInformation::from_focused_workspace(ws)]
+        };
+        let is_selected = self.focused_workspace_idx == index;
+        WorkspaceInformation {
+            name,
+            containers,
+            layer: ws.layer().to_owned(),
+            should_show,
+            is_selected,
+        }
+    }
+}
+
 
 impl WorkspaceInformation {
     fn new(
@@ -1022,12 +1052,45 @@ impl WorkspaceInformation {
         containers: Vec<ContainerInformation>,
         layer: WorkspaceLayer,
         should_show: bool,
+        is_selected: bool,
     ) -> Self {
         Self {
             name,
             containers,
             layer,
             should_show,
+            is_selected,
+        }
+    }
+
+    pub fn from_workspace(
+        ws: &Workspace,
+        index: usize,
+        focused_workspace_idx: usize,
+        show_all_icons: bool,
+        hide_empty_workspaces: bool,
+    ) -> Self {
+        let should_show = if hide_empty_workspaces {
+            focused_workspace_idx == index || !ws.is_empty()
+        } else {
+            true
+        };
+        let name = ws
+            .name()
+            .to_owned()
+            .unwrap_or_else(|| format!("{}", index + 1));
+        let containers = if show_all_icons {
+            ContainerInformation::from_workspace(ws)
+        } else {
+            vec![ContainerInformation::from_focused_workspace(ws)]
+        };
+        let is_selected = focused_workspace_idx == index;
+        Self {
+            name,
+            containers,
+            layer: ws.layer().to_owned(),
+            should_show,
+            is_selected,
         }
     }
 }
@@ -1057,15 +1120,17 @@ impl ContainerInformation {
     pub fn from_workspace(ws: &Workspace) -> Vec<Self> {
         let mut containers = Vec::with_capacity(ws.containers().len());
         let mut has_monocle = false;
-
+        // add monocle container
         if let Some(container) = ws.monocle_container() {
             containers.push(Self::from_container(container, true));
             has_monocle = true;
         }
+        // add all tiled windows
         for (i, container) in ws.containers().iter().enumerate() {
             let is_focused = !has_monocle && i == ws.focused_container_idx();
             containers.push(Self::from_container(container, is_focused));
         }
+        // add all floating windows
         for floating_window in ws.floating_windows() {
             let is_focused = !has_monocle && floating_window.is_focused();
             containers.push(Self::from_window(floating_window, is_focused, false));
