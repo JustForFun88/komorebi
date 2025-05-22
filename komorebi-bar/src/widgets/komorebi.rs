@@ -858,7 +858,7 @@ impl KomorebiNotificationState {
 #[derive(Clone, Debug)]
 pub struct KomorebiNotificationStateNew {
     pub workspaces: Vec<WorkspaceInformation>,
-    pub selected_workspace: String,
+    pub focused_workspace_idx: usize,
     pub focused_container_information: ContainerInformation,
     pub layout: KomorebiLayout,
     pub hide_empty_workspaces: bool,
@@ -950,46 +950,20 @@ impl KomorebiNotificationStateNew {
 
         let monitor = &monitors.elements()[monitor_index];
         self.work_area_offset = monitor.work_area_offset();
+        self.focused_workspace_idx = monitor.focused_workspace_idx();
 
-        let focused_workspace_idx = monitor.focused_workspace_idx();
-        let focused_ws = &monitor.workspaces()[focused_workspace_idx];
+        self.workspaces = WorkspacesContext::new(
+            self.focused_workspace_idx,
+            show_all_icons,
+            self.hide_empty_workspaces,
+        )
+        .build_workspaces(monitor.workspaces().iter().enumerate());
 
-        self.selected_workspace = focused_ws
-            .name()
-            .to_owned()
-            .unwrap_or_else(|| format!("{}", focused_workspace_idx + 1));
-
-        // Build workspaces
-        self.workspaces = monitor
-            .workspaces()
-            .iter()
-            .enumerate()
-            .map(|(i, ws)| {
-                let should_show = if self.hide_empty_workspaces {
-                    focused_workspace_idx == i || !ws.is_empty()
-                } else {
-                    true
-                };
-                let name = ws.name().to_owned().unwrap_or_else(|| format!("{}", i + 1));
-                let containers = if show_all_icons {
-                    ContainerInformation::from_workspace(ws)
-                } else {
-                    vec![ContainerInformation::from_focused_workspace(ws)]
-                };
-                WorkspaceInformation::new(
-                    name,
-                    containers,
-                    ws.layer().to_owned(),
-                    should_show,
-                    focused_workspace_idx == i,
-                )
-            })
-            .collect();
-
+        let focused_ws = &monitor.workspaces()[self.focused_workspace_idx];
         // Layout
         self.layout = if focused_ws.monocle_container().is_some() {
             KomorebiLayout::Monocle
-        } else if !*focused_ws.tile() {
+        } else if !focused_ws.tile() {
             KomorebiLayout::Floating
         } else if notification.state.is_paused {
             KomorebiLayout::Paused
@@ -1015,36 +989,46 @@ pub struct WorkspaceInformation {
     pub is_selected: bool,
 }
 
-pub struct WorkspaceContext {
-    pub focused_workspace_idx: usize,
+pub struct WorkspacesContext {
+    pub focused_idx: usize,
     pub show_all_icons: bool,
-    pub hide_empty_workspaces: bool,
+    pub hide_empty: bool,
 }
 
-impl WorkspaceContext {
-    pub fn build_workspace(&self, ws: &Workspace, index: usize) -> WorkspaceInformation {
-        let should_show = if self.hide_empty_workspaces {
-            self.focused_workspace_idx == index || !ws.is_empty()
-        } else {
-            true
-        };
-        let name = ws.name().to_owned().unwrap_or_else(|| format!("{}", index + 1));
-        let containers = if self.show_all_icons {
-            ContainerInformation::from_workspace(ws)
-        } else {
-            vec![ContainerInformation::from_focused_workspace(ws)]
-        };
-        let is_selected = self.focused_workspace_idx == index;
-        WorkspaceInformation {
-            name,
-            containers,
-            layer: ws.layer().to_owned(),
-            should_show,
-            is_selected,
+impl WorkspacesContext {
+    fn new(focused_idx: usize, show_all_icons: bool, hide_empty: bool) -> Self {
+        Self {
+            focused_idx,
+            show_all_icons,
+            hide_empty,
         }
     }
-}
 
+    pub fn build_workspaces<'a, I>(&self, iter: I) -> Vec<WorkspaceInformation>
+    where
+        I: Iterator<Item = (usize, &'a Workspace)>,
+    {
+        iter.map(|(index, ws)| {
+            let name = ws
+                .name()
+                .to_owned()
+                .unwrap_or_else(|| format!("{}", index + 1));
+            let containers = if self.show_all_icons {
+                ContainerInformation::from_workspace(ws)
+            } else {
+                vec![ContainerInformation::from_focused_workspace(ws)]
+            };
+            WorkspaceInformation {
+                name,
+                containers,
+                layer: ws.layer().to_owned(),
+                should_show: !self.hide_empty || self.focused_idx == index || !ws.is_empty(),
+                is_selected: self.focused_idx == index,
+            }
+        })
+        .collect()
+    }
+}
 
 impl WorkspaceInformation {
     fn new(
