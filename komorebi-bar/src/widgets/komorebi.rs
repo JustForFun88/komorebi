@@ -873,6 +873,10 @@ pub struct MonitorInfo {
 }
 
 impl MonitorInfo {
+    pub fn update_from_config(&mut self, config: &Self) {
+        self.hide_empty_workspaces = config.hide_empty_workspaces;
+    }
+
     #[allow(clippy::too_many_arguments)]
     pub fn handle_notification(
         &mut self,
@@ -951,25 +955,14 @@ impl MonitorInfo {
         self.work_area_offset = monitor.work_area_offset();
         self.focused_workspace_idx = monitor.focused_workspace_idx();
 
-        self.workspaces = self.build_workspaces(monitor.workspaces().iter().enumerate());
+        self.workspaces = self.build_workspaces_info(monitor.workspaces().iter().enumerate());
 
         let focused_ws = &monitor.workspaces()[self.focused_workspace_idx];
         // Layout
-        self.layout = if focused_ws.monocle_container().is_some() {
-            KomorebiLayout::Monocle
-        } else if !focused_ws.tile() {
-            KomorebiLayout::Floating
-        } else if notification.state.is_paused {
-            KomorebiLayout::Paused
-        } else {
-            match focused_ws.layout() {
-                komorebi_client::Layout::Default(layout) => KomorebiLayout::Default(*layout),
-                komorebi_client::Layout::Custom(_) => KomorebiLayout::Custom,
-            }
-        };
+        self.layout = Self::resolve_layout(focused_ws, notification.state.is_paused);
     }
 
-    fn build_workspaces<'a, I>(&self, iter: I) -> Vec<WorkspaceInfo>
+    fn build_workspaces_info<'a, I>(&self, iter: I) -> Vec<WorkspaceInfo>
     where
         I: Iterator<Item = (usize, &'a Workspace)>,
     {
@@ -986,7 +979,7 @@ impl MonitorInfo {
                     .name()
                     .to_owned()
                     .unwrap_or_else(|| format!("{}", index + 1)),
-                focused_container_idx: containers.iter().rposition(|c| c.is_focused),
+                focused_container_idx: containers.iter().position(|c| c.is_focused),
                 containers,
                 layer: *ws.layer(),
                 should_show: !self.hide_empty_workspaces
@@ -996,6 +989,21 @@ impl MonitorInfo {
             }
         })
         .collect()
+    }
+
+    fn resolve_layout(focused_ws: &Workspace, is_paused: bool) -> KomorebiLayout {
+        if focused_ws.monocle_container().is_some() {
+            KomorebiLayout::Monocle
+        } else if !focused_ws.tile() {
+            KomorebiLayout::Floating
+        } else if is_paused {
+            KomorebiLayout::Paused
+        } else {
+            match focused_ws.layout() {
+                komorebi_client::Layout::Default(layout) => KomorebiLayout::Default(*layout),
+                komorebi_client::Layout::Custom(_) => KomorebiLayout::Custom,
+            }
+        }
     }
 }
 
@@ -1034,9 +1042,9 @@ impl ContainerInfo {
             .map(|c| Self::from_container(c, !has_focused_float));
 
         // All tiled containers, focus only if there's no monocle/focused float
-        let focused_monocle_or_float = has_focused_float || monocle.is_some();
+        let has_focused_monocle_or_float = has_focused_float || monocle.is_some();
         let tiled = ws.containers().iter().enumerate().map(|(i, c)| {
-            let is_focused = !focused_monocle_or_float && i == ws.focused_container_idx();
+            let is_focused = !has_focused_monocle_or_float && i == ws.focused_container_idx();
             Self::from_container(c, is_focused)
         });
 
