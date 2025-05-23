@@ -143,23 +143,40 @@ impl From<&KomorebiConfig> for Komorebi {
             };
 
         Self {
-            komorebi_notification_state: Rc::new(RefCell::new(KomorebiNotificationState {
-                selected_workspace: String::new(),
-                layout: KomorebiLayout::Default(komorebi_client::DefaultLayout::BSP),
-                workspaces: vec![],
-                hide_empty_workspaces: value
-                    .workspaces
-                    .map(|w| w.hide_empty_workspaces)
-                    .unwrap_or_default(),
-                mouse_follows_focus: true,
-                work_area_offset: None,
-                focused_container_information: (
-                    false,
-                    KomorebiNotificationStateContainerInformation::EMPTY,
-                ),
-                stack_accent: None,
-                monitor_index: MONITOR_INDEX.load(Ordering::SeqCst),
-                monitor_usr_idx_map: HashMap::new(),
+            komorebi_notification_state: Rc::new(RefCell::new({
+                let ttt = KomorebiNotificationState {
+                    selected_workspace: String::new(),
+                    layout: KomorebiLayout::Default(komorebi_client::DefaultLayout::BSP),
+                    workspaces: vec![],
+                    hide_empty_workspaces: value
+                        .workspaces
+                        .map(|w| w.hide_empty_workspaces)
+                        .unwrap_or_default(),
+                    mouse_follows_focus: true,
+                    work_area_offset: None,
+                    focused_container_information: (
+                        false,
+                        KomorebiNotificationStateContainerInformation::EMPTY,
+                    ),
+                    stack_accent: None,
+                    monitor_index: MONITOR_INDEX.load(Ordering::SeqCst),
+                    monitor_usr_idx_map: HashMap::new(),
+                };
+                MonitorInfo {
+                    workspaces: Vec::new(),
+                    layout: KomorebiLayout::Default(komorebi_client::DefaultLayout::BSP),
+                    mouse_follows_focus: true,
+                    work_area_offset: None,
+                    stack_accent: None,
+                    monitor_index: MONITOR_INDEX.load(Ordering::SeqCst),
+                    monitor_usr_idx_map: HashMap::new(),
+                    focused_workspace_idx: None,
+                    show_all_icons: false,
+                    hide_empty_workspaces: value
+                        .workspaces
+                        .map(|w| w.hide_empty_workspaces)
+                        .unwrap_or_default(),
+                }
             })),
             workspaces: value.workspaces,
             layout: value.layout.clone(),
@@ -173,7 +190,7 @@ impl From<&KomorebiConfig> for Komorebi {
 
 #[derive(Clone, Debug)]
 pub struct Komorebi {
-    pub komorebi_notification_state: Rc<RefCell<KomorebiNotificationState>>,
+    pub komorebi_notification_state: Rc<RefCell<MonitorInfo>>,
     pub workspaces: Option<KomorebiWorkspacesConfig>,
     pub layout: Option<KomorebiLayoutConfig>,
     pub focused_container: Option<KomorebiFocusedContainerConfig>,
@@ -867,7 +884,7 @@ pub struct MonitorInfo {
     pub stack_accent: Option<Color32>,
     pub monitor_index: usize,
     pub monitor_usr_idx_map: HashMap<usize, usize>,
-    pub focused_workspace_idx: usize,
+    pub focused_workspace_idx: Option<usize>,
     pub show_all_icons: bool,
     pub hide_empty_workspaces: bool,
 }
@@ -953,11 +970,11 @@ impl MonitorInfo {
 
         let monitor = &monitors.elements()[monitor_index];
         self.work_area_offset = monitor.work_area_offset();
-        self.focused_workspace_idx = monitor.focused_workspace_idx();
+        self.focused_workspace_idx = Some(monitor.focused_workspace_idx());
 
         self.workspaces = self.build_workspaces_info(monitor.workspaces().iter().enumerate());
 
-        let focused_ws = &monitor.workspaces()[self.focused_workspace_idx];
+        let focused_ws = &monitor.workspaces()[self.focused_workspace_idx.unwrap()];
         // Layout
         self.layout = Self::resolve_layout(focused_ws, notification.state.is_paused);
     }
@@ -983,9 +1000,9 @@ impl MonitorInfo {
                 containers,
                 layer: *ws.layer(),
                 should_show: !self.hide_empty_workspaces
-                    || self.focused_workspace_idx == index
+                    || self.focused_workspace_idx == Some(index)
                     || !ws.is_empty(),
-                is_selected: self.focused_workspace_idx == index,
+                is_selected: self.focused_workspace_idx == Some(index),
             }
         })
         .collect()
