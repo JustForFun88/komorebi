@@ -851,7 +851,10 @@ impl KomorebiNotificationState {
             None => false,
         };
 
-        self.focused_container_information = (is_locked, focused_workspace.into());
+        self.focused_container_information = (
+            is_locked,
+            KomorebiNotificationStateContainerInformation::from(focused_workspace),
+        );
     }
 }
 
@@ -982,8 +985,7 @@ impl MonitorInfo {
             };
             let focused_container_idx = containers
                 .iter()
-                .rposition(|container| container.is_focused)
-                .unwrap_or(0);
+                .rposition(|container| container.is_focused);
             WorkspaceInfo {
                 name: ws
                     .name()
@@ -1002,20 +1004,20 @@ impl MonitorInfo {
     }
 }
 
-fn find_focused_container_index(containers: &[ContainerInfo]) -> Option<usize> {
-    containers
-        .iter()
-        .rposition(|container| container.is_focused)
-}
-
 #[derive(Clone, Debug)]
 pub struct WorkspaceInfo {
     pub name: String,
     pub containers: Vec<ContainerInfo>,
-    pub focused_container_idx: usize,
+    pub focused_container_idx: Option<usize>,
     pub layer: WorkspaceLayer,
     pub should_show: bool,
     pub is_selected: bool,
+}
+
+impl WorkspaceInfo {
+    pub fn focused_container(&self) -> Option<&ContainerInfo> {
+        self.containers.get(self.focused_container_idx?)
+    }
 }
 
 #[derive(Clone, Debug)]
