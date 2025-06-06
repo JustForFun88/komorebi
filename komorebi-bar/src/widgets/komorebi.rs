@@ -45,6 +45,7 @@ use std::cell::RefCell;
 use std::collections::BTreeMap;
 use std::collections::HashMap;
 use std::io::Result as IoResult;
+use std::path::Path;
 use std::path::PathBuf;
 use std::rc::Rc;
 use std::sync::atomic::Ordering;
@@ -299,35 +300,7 @@ impl BarWidget for Komorebi {
         }
 
         self.render_layout(ctx, ui, config);
-
-        if let Some(configuration_switcher) = &self.configuration_switcher {
-            if configuration_switcher.enable {
-                for (name, location) in configuration_switcher.configurations.iter() {
-                    let path = PathBuf::from(location);
-                    if path.is_file() {
-                        config.apply_on_widget(false, ui, |ui| {
-                            if SelectableFrame::new(false)
-                                .show(ui, |ui| ui.add(Label::new(name).selectable(false)))
-                                .clicked()
-                            {
-                                let canonicalized =
-                                    dunce::canonicalize(path.clone()).unwrap_or(path);
-
-                                if komorebi_client::send_message(
-                                    &SocketMessage::ReplaceConfiguration(canonicalized),
-                                )
-                                .is_err()
-                                {
-                                    tracing::error!(
-                                        "could not send message to komorebi: ReplaceConfiguration"
-                                    );
-                                }
-                            }
-                        });
-                    }
-                }
-            }
-        }
+        self.render_config_switcher(ui, config);
 
         if let Some(locked_container_config) = self.locked_container {
             if locked_container_config.enable {
@@ -418,7 +391,7 @@ impl Komorebi {
 
                 if response.clicked() {
                     let message = FocusMonitorWorkspaceNumber(monitor_info.monitor_index, index);
-                    if Self::send_socket_message(monitor_info, message).is_ok() {
+                    if Self::send_message_with_focus(monitor_info, message).is_ok() {
                         monitor_info.focused_workspace_idx = Some(index);
                     }
                 }
@@ -434,6 +407,26 @@ impl Komorebi {
                 monitor_info
                     .layout
                     .show(ctx, ui, config, layout_config, workspace_idx);
+            }
+        }
+    }
+
+    fn render_config_switcher(&mut self, ui: &mut Ui, config: &mut RenderConfig) {
+        let configuration_switcher = match &self.configuration_switcher {
+            Some(config) if config.enable => config,
+            _ => return,
+        };
+        for (name, location) in configuration_switcher.configurations.iter() {
+            let path = Path::new(location);
+            if path.is_file() {
+                config.apply_on_widget(false, ui, |ui| {
+                    let response = SelectableFrame::new(false)
+                        .show(ui, |ui| ui.add(Label::new(name).selectable(false)));
+                    if response.clicked() {
+                        let path = dunce::canonicalize(path).unwrap_or_else(|_| path.to_owned());
+                        let _ = Self::send_messages(&[ReplaceConfiguration(path)]);
+                    }
+                });
             }
         }
     }
@@ -463,25 +456,24 @@ impl Komorebi {
                 });
 
                 if response.clicked() && !selected {
-                    let _ = Self::send_socket_message(monitor_info, FocusStackWindow(idx));
+                    let _ = Self::send_message_with_focus(monitor_info, FocusStackWindow(idx));
                 }
             }
         });
     }
 
-    fn send_socket_message(monitor: &MonitorInfo, message: SocketMessage) -> IoResult<()> {
+    fn send_message_with_focus(monitor: &MonitorInfo, message: SocketMessage) -> IoResult<()> {
         let messages: &[SocketMessage] = if monitor.mouse_follows_focus {
             &[MouseFollowsFocus(false), message, MouseFollowsFocus(true)]
         } else {
             &[message]
         };
+        Self::send_messages(messages)
+    }
 
-        komorebi_client::send_batch(messages.iter().cloned()).map_err(|err| {
-            tracing::error!(
-                "Failed to send workspace focus message(s): {:?}\nError: {}",
-                messages,
-                err
-            );
+    fn send_messages(messages: &[SocketMessage]) -> IoResult<()> {
+        komorebi_client::send_batch(messages).map_err(|err| {
+            tracing::error!("Failed to send message(s): {:?}\nError: {}", messages, err);
             err
         })
     }
