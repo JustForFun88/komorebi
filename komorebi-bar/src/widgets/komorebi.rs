@@ -408,7 +408,7 @@ impl Komorebi {
 #[derive(Clone, Debug)]
 pub struct WorkspacesBar {
     /// Chosen rendering function for this widget
-    renderer: fn(&Self, &Context, &mut Ui, &WorkspaceInfo) -> Response,
+    renderer: fn(&Self, &Context, &mut Ui, &WorkspaceInfo),
     /// Text size (default: 12.5)
     text_size: Vec2,
     /// Icon size (default: 12.5 * 1.4)
@@ -422,20 +422,20 @@ impl From<KomorebiWorkspacesConfig> for WorkspacesBar {
         use WorkspacesDisplayFormat::*;
         // Selects a render strategy according to the workspace config's display format
         // for better performance
-        let renderer: fn(&Self, &Context, &mut Ui, &WorkspaceInfo) -> Response =
+        let renderer: fn(&Self, &Context, &mut Ui, &WorkspaceInfo) =
             match value.display.unwrap_or(DisplayFormat::Text.into()) {
                 // Case 1: - Show icons if any, fallback if none
                 //         - Only hover workspace name
                 AllIcons | Existing(DisplayFormat::Icon) => |bar, ctx, ui, ws| {
                     bar.show_icons(ctx, ui, ws)
                         .unwrap_or_else(|| bar.show_fallback_icon(ctx, ui, ws))
-                        .on_hover_text(&ws.name)
+                        .on_hover_text(&ws.name);
                 },
                 // Case 2: - Show icons if any, with no fallback
                 //         - Label workspace name with color if selected (no hover)
                 AllIconsAndText | Existing(DisplayFormat::IconAndText) => |bar, ctx, ui, ws| {
                     bar.show_icons(ctx, ui, ws);
-                    Self::show_label(ctx, ui, ws)
+                    Self::show_label(ctx, ui, ws);
                 },
                 // Case 3: - Show icons if any, fallback only if not selected and no icons
                 //         - Label workspace name only if selected (always hover name)
@@ -446,9 +446,9 @@ impl From<KomorebiWorkspacesConfig> for WorkspacesBar {
                         }
 
                         if ws.is_selected {
-                            Self::show_label(ctx, ui, ws)
+                            Self::show_label(ctx, ui, ws);
                         } else {
-                            ui.response().on_hover_text(&ws.name)
+                            ui.response().on_hover_text(&ws.name);
                         }
                     }
                 }
@@ -458,11 +458,13 @@ impl From<KomorebiWorkspacesConfig> for WorkspacesBar {
                     if ws.is_selected {
                         bar.show_icons(ctx, ui, ws);
                     }
-                    Self::show_label(ctx, ui, ws)
+                    Self::show_label(ctx, ui, ws);
                 },
                 // Case 5: - Never show icon (no icons at all)
                 //         - Label workspace name always (with color if selected)
-                Existing(DisplayFormat::Text) => |_, ctx, ui, ws| Self::show_label(ctx, ui, ws),
+                Existing(DisplayFormat::Text) => |_, ctx, ui, ws| {
+                    Self::show_label(ctx, ui, ws);
+                },
             };
 
         Self {
@@ -477,8 +479,8 @@ impl From<KomorebiWorkspacesConfig> for WorkspacesBar {
 impl WorkspacesBar {
     /// Draws application icons for a workspace (does no check if workspace has icons).
     fn show_icons(&self, ctx: &Context, ui: &mut Ui, ws: &WorkspaceInfo) -> Option<Response> {
-        if ws.has_icons {
-            let response = Frame::NONE
+        ws.has_icons.then(|| {
+            Frame::NONE
                 .inner_margin(Margin::same(ui.style().spacing.button_padding.y as i8))
                 .show(ui, |ui| {
                     for container in &ws.containers {
@@ -494,10 +496,9 @@ impl WorkspacesBar {
                             );
                         }
                     }
-                });
-            return Some(response.response);
-        }
-        None
+                })
+                .response
+        })
     }
 
     /// Draws a fallback icon (a rectangle with a diagonal) for the workspace.
