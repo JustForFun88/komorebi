@@ -18,6 +18,7 @@ use eframe::egui::Align;
 use eframe::egui::Color32;
 use eframe::egui::Context;
 use eframe::egui::CornerRadius;
+use eframe::egui::FontId;
 use eframe::egui::Frame;
 use eframe::egui::Image;
 use eframe::egui::Label;
@@ -170,7 +171,7 @@ impl From<&KomorebiConfig> for Komorebi {
             layout: value.layout.clone(),
             focused_container: value.focused_container.map(FocusedContainerBar::from),
             workspace_layer: value.workspace_layer.map(WorkspaceLayerBar::from),
-            locked_container: value.locked_container,
+            locked_container: value.locked_container.map(LockedContainerBar::from),
             configuration_switcher,
         }
     }
@@ -183,7 +184,7 @@ pub struct Komorebi {
     pub layout: Option<KomorebiLayoutConfig>,
     pub focused_container: Option<FocusedContainerBar>,
     pub workspace_layer: Option<WorkspaceLayerBar>,
-    pub locked_container: Option<KomorebiLockedContainerConfig>,
+    pub locked_container: Option<LockedContainerBar>,
     pub configuration_switcher: Option<KomorebiConfigurationSwitcherConfig>,
 }
 
@@ -193,69 +194,7 @@ impl BarWidget for Komorebi {
         self.render_workspace_layer(ctx, ui, config);
         self.render_layout(ctx, ui, config);
         self.render_config_switcher(ui, config);
-
-        if let Some(locked_container_config) = self.locked_container {
-            if locked_container_config.enable {
-                let monitor_info = &mut self.komorebi_notification_state.borrow_mut().0;
-                let focused_container = monitor_info.focused_container();
-                let is_locked = focused_container
-                    .map(|container| container.is_locked)
-                    .unwrap_or_default();
-
-                if locked_container_config
-                    .show_when_unlocked
-                    .unwrap_or_default()
-                    || is_locked
-                {
-                    let display_format = locked_container_config
-                        .display
-                        .unwrap_or(DisplayFormat::Text);
-
-                    let mut layout_job = LayoutJob::simple(
-                        if display_format != DisplayFormat::Text {
-                            if is_locked {
-                                egui_phosphor::regular::LOCK_KEY.to_string()
-                            } else {
-                                egui_phosphor::regular::LOCK_SIMPLE_OPEN.to_string()
-                            }
-                        } else {
-                            String::new()
-                        },
-                        config.icon_font_id.clone(),
-                        ctx.style().visuals.selection.stroke.color,
-                        100.0,
-                    );
-
-                    if display_format != DisplayFormat::Icon {
-                        layout_job.append(
-                            if is_locked { "Locked" } else { "Unlocked" },
-                            10.0,
-                            TextFormat {
-                                font_id: config.text_font_id.clone(),
-                                color: ctx.style().visuals.text_color(),
-                                valign: Align::Center,
-                                ..Default::default()
-                            },
-                        );
-                    }
-
-                    config.apply_on_widget(false, ui, |ui| {
-                        if SelectableFrame::new(false)
-                            .show(ui, |ui| ui.add(Label::new(layout_job).selectable(false)))
-                            .clicked()
-                            && komorebi_client::send_batch([
-                                SocketMessage::FocusMonitorAtCursor,
-                                SocketMessage::ToggleLock,
-                            ])
-                            .is_err()
-                        {
-                            tracing::error!("could not send ToggleLock");
-                        }
-                    });
-                }
-            }
-        }
-
+        self.render_locked_container(ctx, ui, config);
         self.render_focused_container(ctx, ui, config);
     }
 }
@@ -351,6 +290,30 @@ impl Komorebi {
                     }
                 });
             }
+        }
+    }
+
+    fn render_locked_container(&mut self, ctx: &Context, ui: &mut Ui, config: &mut RenderConfig) {
+        let Some(bar) = self.locked_container.as_ref().filter(|bar| bar.enable) else {
+            return;
+        };
+
+        let monitor_info = &self.komorebi_notification_state.borrow().0;
+        let is_locked = monitor_info
+            .focused_container()
+            .map(|container| container.is_locked)
+            .unwrap_or_default();
+
+        let (icon_font, txt_font) = (config.icon_font_id.clone(), config.text_font_id.clone());
+        if bar.show_when_unlocked || is_locked {
+            config.apply_on_widget(false, ui, |ui| {
+                SelectableFrame::new(false)
+                    .show(ui, |ui| {
+                        (bar.renderer)(ctx, ui, is_locked, icon_font, txt_font)
+                    })
+                    .clicked()
+                    .then(|| Self::send_messages(&[FocusMonitorAtCursor, ToggleLock]));
+            });
         }
     }
 
@@ -530,6 +493,75 @@ impl WorkspacesBar {
         } else {
             ui.add(Label::new(&ws.name).selectable(false))
         }
+    }
+}
+
+/// LockedContainerBar widget for displaying and interacting with container lock state
+#[derive(Clone, Debug)]
+pub struct LockedContainerBar {
+    /// Whether the widget is enabled
+    enable: bool,
+    /// Show the widget even when unlocked
+    show_when_unlocked: bool,
+    /// Chosen rendering function for this widget
+    renderer: fn(&Context, &mut Ui, bool, FontId, FontId),
+}
+
+impl From<KomorebiLockedContainerConfig> for LockedContainerBar {
+    fn from(value: KomorebiLockedContainerConfig) -> Self {
+        let display_format = value.display.unwrap_or(DisplayFormat::Text);
+
+        // Select renderer strategy based on display format for better performance
+        let renderer: fn(&Context, &mut Ui, bool, FontId, FontId) = match display_format {
+            DisplayFormat::Icon => |ctx, ui, is_locked, icon_font, _txt_font| {
+                let layout_job = Self::icon_layout(ctx, is_locked, icon_font);
+                ui.add(Label::new(layout_job).selectable(false));
+            },
+            DisplayFormat::Text => |ctx, ui, is_locked, _icon_font, txt_font| {
+                let mut layout_job = LayoutJob::default();
+                Self::append_text(&mut layout_job, ctx, is_locked, txt_font);
+                ui.add(Label::new(layout_job).selectable(false));
+            },
+            _ => |ctx, ui: &mut Ui, is_locked, icon_font, txt_font| {
+                let mut layout_job = Self::icon_layout(ctx, is_locked, icon_font);
+                Self::append_text(&mut layout_job, ctx, is_locked, txt_font);
+                ui.add(Label::new(layout_job).selectable(false));
+            },
+        };
+
+        Self {
+            enable: value.enable,
+            show_when_unlocked: value.show_when_unlocked.unwrap_or_default(),
+            renderer,
+        }
+    }
+}
+
+impl LockedContainerBar {
+    fn icon_layout(ctx: &Context, is_locked: bool, icon_font: FontId) -> LayoutJob {
+        LayoutJob::simple(
+            if is_locked {
+                egui_phosphor::regular::LOCK_KEY.to_string()
+            } else {
+                egui_phosphor::regular::LOCK_SIMPLE_OPEN.to_string()
+            },
+            icon_font,
+            ctx.style().visuals.selection.stroke.color,
+            100.0,
+        )
+    }
+
+    fn append_text(job: &mut LayoutJob, ctx: &Context, is_locked: bool, txt_font: FontId) {
+        job.append(
+            if is_locked { "Locked" } else { "Unlocked" },
+            10.0,
+            TextFormat {
+                font_id: txt_font,
+                color: ctx.style().visuals.text_color(),
+                valign: Align::Center,
+                ..Default::default()
+            },
+        )
     }
 }
 
