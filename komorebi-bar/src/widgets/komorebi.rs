@@ -422,25 +422,48 @@ impl From<KomorebiWorkspacesConfig> for WorkspacesBar {
         use WorkspacesDisplayFormat::*;
         // Selects a render strategy according to the workspace config's display format
         // for better performance
-        let renderer = match value.display.unwrap_or(DisplayFormat::Text.into()) {
-            // Case 1: - Show icons if any, fallback if none
-            //         - Only hover workspace name
-            AllIcons | Existing(DisplayFormat::Icon) => Self::show_icons_or_fallback,
-            // Case 2: - Show icons if any, with no fallback
-            //         - Label workspace name with color if selected (no hover)
-            AllIconsAndText | Existing(DisplayFormat::IconAndText) => Self::show_icons_and_label,
-            // Case 3: - Show icons if any, fallback only if not selected and no icons
-            //         - Label workspace name only if selected (always hover name)
-            AllIconsAndTextOnSelected | Existing(DisplayFormat::IconAndTextOnSelected) => {
-                Self::show_icons_sel_label
-            }
-            // Case 4: - Show icons if selected and has icons (no fallback icon)
-            //         - Label workspace name (with color if selected)
-            Existing(DisplayFormat::TextAndIconOnSelected) => Self::show_label_sel_icons,
-            // Case 5: - Never show icon (no icons at all)
-            //         - Label workspace name always (with color if selected)
-            Existing(DisplayFormat::Text) => Self::show_text,
-        };
+        let renderer: fn(&Self, &Context, &mut Ui, &WorkspaceInfo) -> Response =
+            match value.display.unwrap_or(DisplayFormat::Text.into()) {
+                // Case 1: - Show icons if any, fallback if none
+                //         - Only hover workspace name
+                AllIcons | Existing(DisplayFormat::Icon) => |bar, ctx, ui, ws| {
+                    bar.show_icons(ctx, ui, ws)
+                        .unwrap_or_else(|| bar.show_fallback_icon(ctx, ui, ws))
+                        .on_hover_text(&ws.name)
+                },
+                // Case 2: - Show icons if any, with no fallback
+                //         - Label workspace name with color if selected (no hover)
+                AllIconsAndText | Existing(DisplayFormat::IconAndText) => |bar, ctx, ui, ws| {
+                    bar.show_icons(ctx, ui, ws);
+                    Self::show_label(ctx, ui, ws)
+                },
+                // Case 3: - Show icons if any, fallback only if not selected and no icons
+                //         - Label workspace name only if selected (always hover name)
+                AllIconsAndTextOnSelected | Existing(DisplayFormat::IconAndTextOnSelected) => {
+                    |bar, ctx, ui, ws| {
+                        if bar.show_icons(ctx, ui, ws).is_none() && !ws.is_selected {
+                            bar.show_fallback_icon(ctx, ui, ws);
+                        }
+
+                        if ws.is_selected {
+                            Self::show_label(ctx, ui, ws)
+                        } else {
+                            ui.response().on_hover_text(&ws.name)
+                        }
+                    }
+                }
+                // Case 4: - Show icons if selected and has icons (no fallback icon)
+                //         - Label workspace name (with color if selected)
+                Existing(DisplayFormat::TextAndIconOnSelected) => |bar, ctx, ui, ws| {
+                    if ws.is_selected {
+                        bar.show_icons(ctx, ui, ws);
+                    }
+                    Self::show_label(ctx, ui, ws)
+                },
+                // Case 5: - Never show icon (no icons at all)
+                //         - Label workspace name always (with color if selected)
+                Existing(DisplayFormat::Text) => |_, ctx, ui, ws| Self::show_label(ctx, ui, ws),
+            };
 
         Self {
             renderer,
@@ -452,77 +475,29 @@ impl From<KomorebiWorkspacesConfig> for WorkspacesBar {
 }
 
 impl WorkspacesBar {
-    /// Shows workspace: icons if present, otherwise fallback icon.
-    /// Displays only the workspace name as hover tooltip (no visible label).
-    fn show_icons_or_fallback(&self, ctx: &Context, ui: &mut Ui, ws: &WorkspaceInfo) -> Response {
-        if ws.has_icons {
-            self.show_icons(ctx, ui, ws).on_hover_text(&ws.name)
-        } else {
-            self.show_fallback_icon(ctx, ui, ws).on_hover_text(&ws.name)
-        }
-    }
-
-    /// Shows workspace: icons if present (no fallback).
-    /// Always displays the workspace label (highlighted if selected).
-    fn show_icons_and_label(&self, ctx: &Context, ui: &mut Ui, ws: &WorkspaceInfo) -> Response {
-        if ws.has_icons {
-            self.show_icons(ctx, ui, ws);
-        }
-        Self::show_label(ctx, ui, ws)
-    }
-
-    /// 1. Shows workspace: icons if present, fallback icon only if not selected and no icons.
-    /// 2. Displays the workspace label only if selected (no hovel).
-    ///    Shows workspace name as hover tooltip for not selected workspace.
-    fn show_icons_sel_label(&self, ctx: &Context, ui: &mut Ui, ws: &WorkspaceInfo) -> Response {
-        if ws.has_icons {
-            self.show_icons(ctx, ui, ws);
-        } else if !ws.is_selected {
-            self.show_fallback_icon(ctx, ui, ws);
-        }
-
-        if ws.is_selected {
-            Self::show_label(ctx, ui, ws)
-        } else {
-            ui.response().on_hover_text(&ws.name)
-        }
-    }
-
-    /// Shows workspace: icons only if selected. Always displays the workspace label
-    /// (highlighted if selected).
-    fn show_label_sel_icons(&self, ctx: &Context, ui: &mut Ui, ws: &WorkspaceInfo) -> Response {
-        if ws.has_icons && ws.is_selected {
-            self.show_icons(ctx, ui, ws);
-        }
-        Self::show_label(ctx, ui, ws)
-    }
-
-    /// Shows workspace: never displays icons. Always displays the workspace label
-    /// (highlighted if selected).
-    fn show_text(&self, ctx: &Context, ui: &mut Ui, ws: &WorkspaceInfo) -> Response {
-        Self::show_label(ctx, ui, ws)
-    }
-
     /// Draws application icons for a workspace (does no check if workspace has icons).
-    fn show_icons(&self, ctx: &Context, ui: &mut Ui, ws: &WorkspaceInfo) -> Response {
-        Frame::NONE
-            .inner_margin(Margin::same(ui.style().spacing.button_padding.y as i8))
-            .show(ui, |ui| {
-                for container in &ws.containers {
-                    for icon in container.windows.iter().filter_map(|win| win.icon.as_ref()) {
-                        ui.add(
-                            Image::from(&icon.texture(ctx))
-                                .maintain_aspect_ratio(true)
-                                .fit_to_exact_size(if container.is_focused {
-                                    self.icon_size
-                                } else {
-                                    self.text_size
-                                }),
-                        );
+    fn show_icons(&self, ctx: &Context, ui: &mut Ui, ws: &WorkspaceInfo) -> Option<Response> {
+        if ws.has_icons {
+            let response = Frame::NONE
+                .inner_margin(Margin::same(ui.style().spacing.button_padding.y as i8))
+                .show(ui, |ui| {
+                    for container in &ws.containers {
+                        for icon in container.windows.iter().filter_map(|win| win.icon.as_ref()) {
+                            ui.add(
+                                Image::from(&icon.texture(ctx))
+                                    .maintain_aspect_ratio(true)
+                                    .fit_to_exact_size(if container.is_focused {
+                                        self.icon_size
+                                    } else {
+                                        self.text_size
+                                    }),
+                            );
+                        }
                     }
-                }
-            })
-            .response
+                });
+            return Some(response.response);
+        }
+        None
     }
 
     /// Draws a fallback icon (a rectangle with a diagonal) for the workspace.
