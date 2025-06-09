@@ -48,7 +48,6 @@ use std::collections::BTreeMap;
 use std::collections::HashMap;
 use std::io::Result as IoResult;
 use std::path::Path;
-use std::path::PathBuf;
 use std::rc::Rc;
 use std::sync::atomic::Ordering;
 
@@ -135,43 +134,32 @@ pub struct KomorebiConfigurationSwitcherConfig {
 }
 
 impl From<&KomorebiConfig> for Komorebi {
-    fn from(value: &KomorebiConfig) -> Self {
-        let configuration_switcher =
-            if let Some(configuration_switcher) = &value.configuration_switcher {
-                let mut configuration_switcher = configuration_switcher.clone();
-                for (_, location) in configuration_switcher.configurations.iter_mut() {
-                    *location = dunce::simplified(&PathBuf::from(location.clone()).replace_env())
-                        .to_string_lossy()
-                        .to_string();
-                }
-                Some(configuration_switcher)
-            } else {
-                None
-            };
+    fn from(cfg: &KomorebiConfig) -> Self {
+        let configuration_switcher = cfg.configuration_switcher.clone().map(|mut cs| {
+            for location in cs.configurations.values_mut() {
+                let path = Path::new(location).replace_env();
+                *location = dunce::simplified(&path).to_string_lossy().to_string();
+            }
+            cs
+        });
 
         Self {
             komorebi_notification_state: Rc::new(RefCell::new(KomorebiNotificationStateNew(
                 MonitorInfo {
-                    workspaces: Vec::new(),
-                    layout: KomorebiLayout::Default(komorebi_client::DefaultLayout::BSP),
-                    mouse_follows_focus: true,
-                    work_area_offset: None,
-                    stack_accent: None,
-                    monitor_index: MONITOR_INDEX.load(Ordering::SeqCst),
-                    monitor_usr_idx_map: HashMap::new(),
-                    focused_workspace_idx: None,
-                    show_all_icons: false,
-                    hide_empty_workspaces: value
+                    hide_empty_workspaces: cfg
                         .workspaces
                         .map(|w| w.hide_empty_workspaces)
                         .unwrap_or_default(),
+                    ..Default::default()
                 },
             ))),
-            workspaces: value.workspaces.map(WorkspacesBar::from),
-            layout: value.layout.clone(),
-            focused_container: value.focused_container.map(FocusedContainerBar::from),
-            workspace_layer: value.workspace_layer.map(WorkspaceLayerBar::from),
-            locked_container: value.locked_container.map(LockedContainerBar::from),
+            workspaces: cfg.workspaces.and_then(WorkspacesBar::try_from),
+            layout: cfg.layout.clone(),
+            focused_container: cfg
+                .focused_container
+                .and_then(FocusedContainerBar::try_from),
+            workspace_layer: cfg.workspace_layer.and_then(WorkspaceLayerBar::try_from),
+            locked_container: cfg.locked_container.and_then(LockedContainerBar::try_from),
             configuration_switcher,
         }
     }
@@ -204,7 +192,7 @@ impl Komorebi {
         let monitor_info = &mut self.komorebi_notification_state.borrow_mut().0;
 
         let bar = match &mut self.workspaces {
-            Some(wg) if wg.enable && !monitor_info.workspaces.is_empty() => wg,
+            Some(wg) if !monitor_info.workspaces.is_empty() => wg,
             _ => return,
         };
 
@@ -231,7 +219,7 @@ impl Komorebi {
     }
 
     fn render_workspace_layer(&mut self, ctx: &Context, ui: &mut Ui, config: &mut RenderConfig) {
-        let Some(bar) = self.workspace_layer.as_ref().filter(|bar| bar.enable) else {
+        let Some(bar) = &self.workspace_layer else {
             return;
         };
 
@@ -294,7 +282,7 @@ impl Komorebi {
     }
 
     fn render_locked_container(&mut self, ctx: &Context, ui: &mut Ui, config: &mut RenderConfig) {
-        let Some(bar) = self.locked_container.as_ref().filter(|bar| bar.enable) else {
+        let Some(bar) = &self.locked_container else {
             return;
         };
 
@@ -318,7 +306,7 @@ impl Komorebi {
     }
 
     fn render_focused_container(&mut self, ctx: &Context, ui: &mut Ui, config: &mut RenderConfig) {
-        let Some(bar) = self.focused_container.as_ref().filter(|bar| bar.enable) else {
+        let Some(bar) = &self.focused_container else {
             return;
         };
         let monitor_info = &self.komorebi_notification_state.borrow().0;
@@ -376,38 +364,35 @@ pub struct WorkspacesBar {
     text_size: Vec2,
     /// Icon size (default: 12.5 * 1.4)
     icon_size: Vec2,
-    /// Whether the widget is enabled
-    pub enable: bool,
 }
 
-impl From<KomorebiWorkspacesConfig> for WorkspacesBar {
-    fn from(value: KomorebiWorkspacesConfig) -> Self {
+impl WorkspacesBar {
+    fn try_from(value: KomorebiWorkspacesConfig) -> Option<Self> {
         use WorkspacesDisplayFormat::*;
+        if !value.enable {
+            return None;
+        }
         // Selects a render strategy according to the workspace config's display format
         // for better performance
         let renderer: fn(&Self, &Context, &mut Ui, &WorkspaceInfo) =
             match value.display.unwrap_or(DisplayFormat::Text.into()) {
-                // Case 1: - Show icons if any, fallback if none
-                //         - Only hover workspace name
+                // 1: Show icons if any, fallback if none | Only hover workspace name
                 AllIcons | Existing(DisplayFormat::Icon) => |bar, ctx, ui, ws| {
                     bar.show_icons(ctx, ui, ws)
                         .unwrap_or_else(|| bar.show_fallback_icon(ctx, ui, ws))
                         .on_hover_text(&ws.name);
                 },
-                // Case 2: - Show icons if any, with no fallback
-                //         - Label workspace name with color if selected (no hover)
+                // 2: Show icons, with no fallback | Label workspace name (no hover)
                 AllIconsAndText | Existing(DisplayFormat::IconAndText) => |bar, ctx, ui, ws| {
                     bar.show_icons(ctx, ui, ws);
                     Self::show_label(ctx, ui, ws);
                 },
-                // Case 3: - Show icons if any, fallback only if not selected and no icons
-                //         - Label workspace name only if selected (always hover name)
+                // 3: Show icons, fallback if no icons and not selected | Label workspace name if selected else hover
                 AllIconsAndTextOnSelected | Existing(DisplayFormat::IconAndTextOnSelected) => {
                     |bar, ctx, ui, ws| {
                         if bar.show_icons(ctx, ui, ws).is_none() && !ws.is_selected {
                             bar.show_fallback_icon(ctx, ui, ws);
                         }
-
                         if ws.is_selected {
                             Self::show_label(ctx, ui, ws);
                         } else {
@@ -415,31 +400,26 @@ impl From<KomorebiWorkspacesConfig> for WorkspacesBar {
                         }
                     }
                 }
-                // Case 4: - Show icons if selected and has icons (no fallback icon)
-                //         - Label workspace name (with color if selected)
+                // 4: Show icons if selected and has icons (no fallback) | Label workspace name
                 Existing(DisplayFormat::TextAndIconOnSelected) => |bar, ctx, ui, ws| {
                     if ws.is_selected {
                         bar.show_icons(ctx, ui, ws);
                     }
                     Self::show_label(ctx, ui, ws);
                 },
-                // Case 5: - Never show icon (no icons at all)
-                //         - Label workspace name always (with color if selected)
+                // 5: Never show icon (no icons at all) | Label workspace name always
                 Existing(DisplayFormat::Text) => |_, ctx, ui, ws| {
                     Self::show_label(ctx, ui, ws);
                 },
             };
 
-        Self {
+        Some(Self {
             renderer,
-            enable: value.enable,
             icon_size: Vec2::splat(12.5),
             text_size: Vec2::splat(12.5 * 1.4),
-        }
+        })
     }
-}
 
-impl WorkspacesBar {
     /// Draws application icons for a workspace (does no check if workspace has icons).
     fn show_icons(&self, ctx: &Context, ui: &mut Ui, ws: &WorkspaceInfo) -> Option<Response> {
         ws.has_icons.then(|| {
@@ -499,16 +479,17 @@ impl WorkspacesBar {
 /// LockedContainerBar widget for displaying and interacting with container lock state
 #[derive(Clone, Debug)]
 pub struct LockedContainerBar {
-    /// Whether the widget is enabled
-    enable: bool,
     /// Show the widget even when unlocked
     show_when_unlocked: bool,
     /// Chosen rendering function for this widget
     renderer: fn(&Context, &mut Ui, bool, FontId, FontId),
 }
 
-impl From<KomorebiLockedContainerConfig> for LockedContainerBar {
-    fn from(value: KomorebiLockedContainerConfig) -> Self {
+impl LockedContainerBar {
+    fn try_from(value: KomorebiLockedContainerConfig) -> Option<Self> {
+        if !value.enable {
+            return None;
+        }
         let display_format = value.display.unwrap_or(DisplayFormat::Text);
 
         // Select renderer strategy based on display format for better performance
@@ -529,15 +510,12 @@ impl From<KomorebiLockedContainerConfig> for LockedContainerBar {
             },
         };
 
-        Self {
-            enable: value.enable,
+        Some(Self {
             show_when_unlocked: value.show_when_unlocked.unwrap_or_default(),
             renderer,
-        }
+        })
     }
-}
 
-impl LockedContainerBar {
     fn icon_layout(ctx: &Context, is_locked: bool, icon_font: FontId) -> LayoutJob {
         LayoutJob::simple(
             if is_locked {
@@ -569,16 +547,17 @@ impl LockedContainerBar {
 /// in the currently focused container.
 #[derive(Clone, Debug)]
 pub struct FocusedContainerBar {
-    /// Whether the widget is enabled
-    enable: bool,
     /// Chosen rendering function for this widget
     renderer: fn(&Self, &Context, &mut Ui, &WindowInfo, Color32, focused: bool),
     /// Icon size (default: 12.5 * 1.4)
     icon_size: Vec2,
 }
 
-impl From<KomorebiFocusedContainerConfig> for FocusedContainerBar {
-    fn from(value: KomorebiFocusedContainerConfig) -> Self {
+impl FocusedContainerBar {
+    fn try_from(value: KomorebiFocusedContainerConfig) -> Option<Self> {
+        if !value.enable {
+            return None;
+        }
         // Handle legacy setting - convert show_icon to display format
         let format = value
             .display
@@ -589,40 +568,38 @@ impl From<KomorebiFocusedContainerConfig> for FocusedContainerBar {
             });
 
         // Select renderer strategy based on display format for better performance
-        let renderer: fn(&Self, &Context, &mut Ui, &WindowInfo, Color32, bool) = match format {
-            Icon => |_self, ctx, ui, info, _color, _focused| {
-                Self::show_icon::<true>(_self, ctx, ui, info);
-            },
-            Text => |_self, _ctx, ui, info, color, _focused| {
-                Self::show_title(_self, ui, info, color);
-            },
-            IconAndText => |_self, ctx, ui, info, color, _focused| {
-                Self::show_icon::<false>(_self, ctx, ui, info);
-                Self::show_title(_self, ui, info, color);
-            },
-            IconAndTextOnSelected => |_self, ctx, ui, info, color, focused| {
-                Self::show_icon::<false>(_self, ctx, ui, info);
-                if focused {
-                    Self::show_title(_self, ui, info, color);
-                }
-            },
-            TextAndIconOnSelected => |_self, ctx, ui, info, color, focused| {
-                if focused {
-                    Self::show_icon::<false>(_self, ctx, ui, info);
-                }
-                Self::show_title(_self, ui, info, color);
-            },
-        };
+        let renderer: fn(&FocusedContainerBar, &Context, &mut Ui, &WindowInfo, Color32, bool) =
+            match format {
+                Icon => |_self, ctx, ui, info, _color, _focused| {
+                    FocusedContainerBar::show_icon::<true>(_self, ctx, ui, info);
+                },
+                Text => |_self, _ctx, ui, info, color, _focused| {
+                    FocusedContainerBar::show_title(_self, ui, info, color);
+                },
+                IconAndText => |_self, ctx, ui, info, color, _focused| {
+                    FocusedContainerBar::show_icon::<false>(_self, ctx, ui, info);
+                    FocusedContainerBar::show_title(_self, ui, info, color);
+                },
+                IconAndTextOnSelected => |_self, ctx, ui, info, color, focused| {
+                    FocusedContainerBar::show_icon::<false>(_self, ctx, ui, info);
+                    if focused {
+                        FocusedContainerBar::show_title(_self, ui, info, color);
+                    }
+                },
+                TextAndIconOnSelected => |_self, ctx, ui, info, color, focused| {
+                    if focused {
+                        FocusedContainerBar::show_icon::<false>(_self, ctx, ui, info);
+                    }
+                    FocusedContainerBar::show_title(_self, ui, info, color);
+                },
+            };
 
-        Self {
-            enable: value.enable,
+        Some(FocusedContainerBar {
             renderer,
             icon_size: Vec2::splat(12.5 * 1.4),
-        }
+        })
     }
-}
 
-impl FocusedContainerBar {
     fn show_icon<const HOVEL: bool>(&self, ctx: &Context, ui: &mut Ui, info: &WindowInfo) {
         let inner_response = Frame::NONE
             .inner_margin(Margin::same(ui.style().spacing.button_padding.y as i8))
@@ -653,16 +630,17 @@ impl FocusedContainerBar {
 /// WorkspaceLayerBar widget for displaying and interacting with workspace layers
 #[derive(Clone, Debug)]
 pub struct WorkspaceLayerBar {
-    /// Whether the widget is enabled
-    enable: bool,
     /// Show the widget even if the layer is Tiling
     show_when_tiling: bool,
     /// Chosen rendering function for this widget
     renderer: fn(&Context, &mut Ui, &WorkspaceLayer, Vec2),
 }
 
-impl From<KomorebiWorkspaceLayerConfig> for WorkspaceLayerBar {
-    fn from(value: KomorebiWorkspaceLayerConfig) -> Self {
+impl WorkspaceLayerBar {
+    fn try_from(value: KomorebiWorkspaceLayerConfig) -> Option<Self> {
+        if !value.enable {
+            return None;
+        }
         let display_format = value.display.unwrap_or(Text);
 
         // Select renderer strategy based on display format for better performance
@@ -677,15 +655,12 @@ impl From<KomorebiWorkspaceLayerConfig> for WorkspaceLayerBar {
             },
         };
 
-        Self {
-            enable: value.enable,
+        Some(Self {
             show_when_tiling: value.show_when_tiling.unwrap_or_default(),
             renderer,
-        }
+        })
     }
-}
 
-impl WorkspaceLayerBar {
     fn draw_layer_icon(ctx: &Context, ui: &mut Ui, layer: &WorkspaceLayer, size: Vec2) {
         if matches!(layer, WorkspaceLayer::Tiling) {
             let (response, painter) = ui.allocate_painter(size, Sense::hover());
@@ -827,6 +802,23 @@ pub struct MonitorInfo {
     pub focused_workspace_idx: Option<usize>,
     pub show_all_icons: bool,
     pub hide_empty_workspaces: bool,
+}
+
+impl Default for MonitorInfo {
+    fn default() -> Self {
+        Self {
+            workspaces: Vec::new(),
+            layout: KomorebiLayout::Default(komorebi_client::DefaultLayout::BSP),
+            mouse_follows_focus: true,
+            work_area_offset: None,
+            stack_accent: None,
+            monitor_index: MONITOR_INDEX.load(Ordering::SeqCst),
+            monitor_usr_idx_map: HashMap::new(),
+            focused_workspace_idx: None,
+            show_all_icons: false,
+            hide_empty_workspaces: false,
+        }
+    }
 }
 
 impl MonitorInfo {
