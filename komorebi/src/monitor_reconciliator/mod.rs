@@ -378,7 +378,7 @@ where
                                 {
                                     let focused_window_idx = container.focused_window_idx();
                                     for (w_idx, window) in container.windows().iter().enumerate() {
-                                        windows_to_remove.push(window.hwnd);
+                                        windows_to_remove.push(*window);
                                         if is_focused_workspace
                                             && c_idx == focused_container_idx
                                             && w_idx == focused_window_idx
@@ -393,7 +393,7 @@ where
                                 }
 
                                 if let Some(maximized) = workspace.maximized_window() {
-                                    windows_to_remove.push(maximized.hwnd);
+                                    windows_to_remove.push(*maximized);
                                     // Minimize the focused window since Windows might try
                                     // to move it to another monitor if it was focused.
                                     if maximized.is_focused() {
@@ -403,7 +403,7 @@ where
 
                                 if let Some(container) = workspace.monocle_container() {
                                     for window in container.windows() {
-                                        windows_to_remove.push(window.hwnd);
+                                        windows_to_remove.push(*window);
                                     }
                                     if let Some(window) = container.focused_window() {
                                         // Minimize the focused window since Windows might try
@@ -415,7 +415,7 @@ where
                                 }
 
                                 for window in workspace.floating_windows() {
-                                    windows_to_remove.push(window.hwnd);
+                                    windows_to_remove.push(*window);
                                     // Minimize the focused window since Windows might try
                                     // to move it to another monitor if it was focused.
                                     if window.is_focused() {
@@ -452,7 +452,7 @@ where
                     }
 
                     // Update known_hwnds
-                    wm.known_hwnds.retain(|i, _| !windows_to_remove.contains(i));
+                    wm.known_wins.retain(|i, _| !windows_to_remove.contains(i));
 
                     if !newly_removed_displays.is_empty() {
                         // After we have cached them, remove them from our state
@@ -505,7 +505,7 @@ where
                         "monitor count mismatch ({post_removal_monitor_count} vs {post_addition_monitor_count}), adding connected monitors",
                     );
 
-                    let known_hwnds = wm.known_hwnds.clone();
+                    let known_wins = wm.known_wins.clone();
                     let offset = wm.work_area_offset;
                     let mouse_follows_focus = wm.mouse_follows_focus;
                     let focused_monitor_idx = wm.focused_monitor_idx();
@@ -571,8 +571,7 @@ where
                                         workspace.containers_mut().iter_mut().enumerate()
                                     {
                                         container.windows_mut().retain(|window| {
-                                            window.exe().is_ok()
-                                                && !known_hwnds.contains_key(&window.hwnd)
+                                            window.exe().is_ok() && !known_wins.contains_key(window)
                                         });
 
                                         if container.windows().is_empty() {
@@ -581,11 +580,8 @@ where
 
                                         if is_focused_workspace {
                                             if let Some(window) = container.focused_window() {
-                                                tracing::debug!(
-                                                    "restoring window: {}",
-                                                    window.hwnd
-                                                );
-                                                WindowsApi::restore_window(window.hwnd);
+                                                tracing::debug!("restoring: {:?}", window);
+                                                WindowsApi::restore_window(*window);
                                             } else {
                                                 // If the focused window was moved or removed by
                                                 // the user after the disconnect then focus the
@@ -593,7 +589,7 @@ where
                                                 container.focus_window(0);
 
                                                 if let Some(window) = container.focused_window() {
-                                                    WindowsApi::restore_window(window.hwnd);
+                                                    WindowsApi::restore_window(*window);
                                                 }
                                             }
                                         }
@@ -609,26 +605,24 @@ where
                                     }
 
                                     if let Some(window) = workspace.maximized_window() {
-                                        if window.exe().is_err()
-                                            || known_hwnds.contains_key(&window.hwnd)
+                                        if window.exe().is_err() || known_wins.contains_key(window)
                                         {
                                             workspace.set_maximized_window(None);
                                         } else if is_focused_workspace {
-                                            WindowsApi::restore_window(window.hwnd);
+                                            WindowsApi::restore_window(*window);
                                         }
                                     }
 
                                     if let Some(container) = workspace.monocle_container_mut() {
                                         container.windows_mut().retain(|window| {
-                                            window.exe().is_ok()
-                                                && !known_hwnds.contains_key(&window.hwnd)
+                                            window.exe().is_ok() && !known_wins.contains_key(window)
                                         });
 
                                         if container.windows().is_empty() {
                                             workspace.set_monocle_container(None);
                                         } else if is_focused_workspace {
                                             if let Some(window) = container.focused_window() {
-                                                WindowsApi::restore_window(window.hwnd);
+                                                WindowsApi::restore_window(*window);
                                             } else {
                                                 // If the focused window was moved or removed by
                                                 // the user after the disconnect then focus the
@@ -636,20 +630,19 @@ where
                                                 container.focus_window(0);
 
                                                 if let Some(window) = container.focused_window() {
-                                                    WindowsApi::restore_window(window.hwnd);
+                                                    WindowsApi::restore_window(*window);
                                                 }
                                             }
                                         }
                                     }
 
                                     workspace.floating_windows_mut().retain(|window| {
-                                        window.exe().is_ok()
-                                            && !known_hwnds.contains_key(&window.hwnd)
+                                        window.exe().is_ok() && !known_wins.contains_key(window)
                                     });
 
                                     if is_focused_workspace {
                                         for window in workspace.floating_windows() {
-                                            WindowsApi::restore_window(window.hwnd);
+                                            WindowsApi::restore_window(*window);
                                         }
                                     }
 
