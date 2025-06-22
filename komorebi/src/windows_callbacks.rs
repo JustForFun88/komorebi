@@ -133,7 +133,7 @@ pub extern "system" fn win_event_hook(
         None => {
             tracing::trace!(
                 "Unhandled WinEvent: {winevent} (hwnd: {}, exe: {}, title: {}, class: {})",
-                window.hwnd().0 as usize,
+                window.hwnd().0 as isize,
                 window.exe().unwrap_or_default(),
                 window.title().unwrap_or_default(),
                 window.class().unwrap_or_default()

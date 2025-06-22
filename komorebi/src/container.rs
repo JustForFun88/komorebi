@@ -68,27 +68,15 @@ impl Lockable for Container {
 
 impl Container {
     pub fn hide(&self, omit: Option<Window>) {
-        for window in self.windows().iter().rev() {
-            let mut should_hide = omit.is_none();
-
-            if !should_hide {
-                if let Some(omit) = omit {
-                    if omit != *window {
-                        should_hide = true
-                    }
-                }
-            }
-
-            if should_hide {
-                window.hide();
-            }
-        }
+        self.windows()
+            .iter()
+            .rev()
+            .filter(|w| omit.map_or(true, |o| o != **w))
+            .for_each(|w| w.hide())
     }
 
     pub fn restore(&self) {
-        if let Some(window) = self.focused_window() {
-            window.restore();
-        }
+        self.focused_window().map(|w| w.restore());
     }
 
     /// Hides the unfocused windows of the container and restores the focused one. This function
@@ -107,27 +95,15 @@ impl Container {
     }
 
     pub fn window_from_exe(&self, exe: &str) -> Option<Window> {
-        for window in self.windows() {
-            if let Ok(window_exe) = window.exe() {
-                if exe == window_exe {
-                    return Option::from(*window);
-                }
-            }
-        }
-
-        None
+        self.windows()
+            .iter()
+            .find_map(|win| win.exe().ok().filter(|e| e == exe).map(|_| *win))
     }
 
     pub fn idx_from_exe(&self, exe: &str) -> Option<usize> {
-        for (idx, window) in self.windows().iter().enumerate() {
-            if let Ok(window_exe) = window.exe() {
-                if exe == window_exe {
-                    return Option::from(idx);
-                }
-            }
-        }
-
-        None
+        self.windows()
+            .iter()
+            .position(|win| win.exe().ok().as_deref() == Some(exe))
     }
 
     pub fn contains_window(&self, window: Window) -> bool {
