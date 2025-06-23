@@ -528,7 +528,63 @@ impl WindowManager {
                             let container_padding = workspace.container_padding();
                             let workspace_padding = workspace.workspace_padding();
 
-                            *workspace = state_workspace.clone();
+                            *workspace = Workspace {
+                                name: state_workspace.name.clone(),
+                                containers: {
+                                    let mut cont = Ring::default();
+                                    *cont.elements_mut() = state_workspace
+                                        .containers
+                                        .elements()
+                                        .iter()
+                                        .map(|c| {
+                                            let mut cont = Container::default();
+                                            *cont.windows_mut() = c.windows().clone();
+                                            cont.set_locked(c.locked());
+                                            cont
+                                        })
+                                        .collect();
+                                    cont.focus(state_workspace.containers.focused_idx());
+                                    cont
+                                },
+                                monocle_container: state_workspace.monocle_container.clone(),
+                                monocle_container_restore_idx: state_workspace
+                                    .monocle_container_restore_idx,
+                                maximized_window: state_workspace.maximized_window,
+                                maximized_window_restore_idx: state_workspace
+                                    .maximized_window_restore_idx,
+                                floating_windows: state_workspace.floating_windows.clone(),
+                                layout: state_workspace.layout.clone(),
+                                layout_options: state_workspace.layout_options,
+                                layout_rules: state_workspace.layout_rules.clone(),
+                                layout_flip: state_workspace.layout_flip,
+                                workspace_padding: state_workspace.workspace_padding,
+                                container_padding: state_workspace.container_padding,
+                                latest_layout: state_workspace.latest_layout.clone(),
+                                resize_dimensions: state_workspace.resize_dimensions.clone(),
+                                tile: state_workspace.tile,
+                                apply_window_based_work_area_offset: state_workspace
+                                    .apply_window_based_work_area_offset,
+                                window_container_behaviour: state_workspace
+                                    .window_container_behaviour,
+                                window_container_behaviour_rules: state_workspace
+                                    .window_container_behaviour_rules
+                                    .clone(),
+                                float_override: state_workspace.float_override,
+                                layer: state_workspace.layer,
+                                floating_layer_behaviour: state_workspace.floating_layer_behaviour,
+                                globals: state_workspace.globals,
+                                wallpaper: state_workspace.wallpaper.clone(),
+                                workspace_config: None,
+                            };
+
+                            if let Some(container) = workspace.monocle_container() {
+                                for window in container.windows() {
+                                    if window.exe().is_err() {
+                                        can_apply = false;
+                                        break;
+                                    }
+                                }
+                            }
 
                             workspace.set_container_padding(container_padding);
                             workspace.set_workspace_padding(workspace_padding);

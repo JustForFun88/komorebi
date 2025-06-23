@@ -1,14 +1,14 @@
+use serde::de;
+use serde::Deserializer;
 use std::collections::VecDeque;
-use std::sync::Arc;
+use std::sync::atomic::AtomicU64;
+use std::sync::atomic::Ordering;
 
 use getset::CopyGetters;
 use getset::Getters;
 use getset::Setters;
-use nanoid::nanoid;
 use serde::Deserialize;
-use serde::Deserializer;
 use serde::Serialize;
-use serde::Serializer;
 
 use crate::ring::Ring;
 use crate::window::Window;
@@ -17,30 +17,64 @@ use crate::Lockable;
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Getters, CopyGetters, Setters)]
 #[cfg_attr(feature = "schemars", derive(schemars::JsonSchema))]
 pub struct Container {
-    #[getset(get = "pub")]
-    #[serde(serialize_with = "serialize", deserialize_with = "deserialize")]
-    id: Arc<str>,
+    #[getset(get_copy = "pub")]
+    id: ContainerId,
     #[serde(default)]
     #[getset(get_copy = "pub", set = "pub")]
     locked: bool,
     windows: Ring<Window>,
 }
 
-/// Helper function to serialize the Arc<str>
-fn serialize<S>(arc: &Arc<str>, serializer: S) -> Result<S::Ok, S::Error>
-where
-    S: Serializer,
-{
-    serializer.serialize_str(arc.as_ref())
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize)]
+#[serde(transparent)]
+#[cfg_attr(feature = "schemars", derive(schemars::JsonSchema))]
+#[cfg_attr(feature = "schemars", schemars(transparent))]
+pub struct ContainerId(u64);
+
+impl<'de> Deserialize<'de> for ContainerId {
+    fn deserialize<D: Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+        struct ContainerIdVisitor;
+
+        impl<'de> de::Visitor<'de> for ContainerIdVisitor {
+            type Value = ContainerId;
+
+            fn expecting(&self, formatter: &mut std::fmt::Formatter) -> std::fmt::Result {
+                formatter.write_str("u64 or string representing a u64")
+            }
+
+            fn visit_u64<E>(self, value: u64) -> Result<Self::Value, E> {
+                Ok(ContainerId(value))
+            }
+            fn visit_str<E: de::Error>(self, value: &str) -> Result<Self::Value, E> {
+                value
+                    .parse::<u64>()
+                    .map(ContainerId)
+                    .map_err(|_| de::Error::invalid_value(de::Unexpected::Str(value), &self))
+            }
+        }
+
+        d.deserialize_any(ContainerIdVisitor)
+    }
 }
 
-/// Helper function to deserialize the Arc<str>
-fn deserialize<'de, D>(deserializer: D) -> Result<Arc<str>, D::Error>
-where
-    D: Deserializer<'de>,
-{
-    let s: &str = Deserialize::deserialize(deserializer)?;
-    Ok(Arc::from(s))
+impl std::fmt::Display for ContainerId {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.0)
+    }
+}
+
+impl ContainerId {
+    #[allow(clippy::new_without_default)]
+    pub fn new() -> Self {
+        static COUNTER: AtomicU64 = AtomicU64::new(1);
+        let id = COUNTER.fetch_add(1, Ordering::Relaxed);
+        ContainerId(id)
+    }
+
+    #[cfg(test)]
+    fn get(&self) -> u64 {
+        self.0
+    }
 }
 
 impl_ring_elements!(Container, Window);
@@ -48,7 +82,7 @@ impl_ring_elements!(Container, Window);
 impl Default for Container {
     fn default() -> Self {
         Self {
-            id: Arc::from(nanoid!()),
+            id: ContainerId::new(),
             locked: false,
             windows: Ring::default(),
         }
@@ -294,23 +328,43 @@ mod tests {
     #[test]
     fn deserializes_with_missing_locked_field_defaults_to_false() {
         let json = r#"{
-            "id": "test-1",
+            "id": "12345",
             "windows": { "elements": [], "focused": 0 }
         }"#;
         let container: Container = serde_json::from_str(json).expect("Should deserialize");
 
         assert!(!container.locked());
-        assert_eq!(&**container.id(), "test-1");
+        assert_eq!(container.id().get(), 12345);
         assert!(container.windows().is_empty());
 
         let json = r#"{
-            "id": "test-2",
+            "id": "54321",
             "windows": { "elements": [ { "hwnd": 5 }, { "hwnd": 9 } ], "focused": 1 }
         }"#;
         let container: Container = serde_json::from_str(json).unwrap();
-        assert_eq!(&**container.id(), "test-2");
+        assert_eq!(container.id().get(), 54321);
         assert!(!container.locked());
         assert_eq!(container.windows(), &[Window::from(5), Window::from(9)]);
+        assert_eq!(container.focused_window_idx(), 1);
+
+        let json = r#"{
+            "id": 98765,
+            "windows": { "elements": [], "focused": 0 }
+        }"#;
+        let container: Container = serde_json::from_str(json).expect("Should deserialize");
+
+        assert!(!container.locked());
+        assert_eq!(container.id().get(), 98765);
+        assert!(container.windows().is_empty());
+
+        let json = r#"{
+            "id": 789754,
+            "windows": { "elements": [ { "hwnd": 15 }, { "hwnd": 42 } ], "focused": 1 }
+        }"#;
+        let container: Container = serde_json::from_str(json).unwrap();
+        assert_eq!(container.id().get(), 789754);
+        assert!(!container.locked());
+        assert_eq!(container.windows(), &[Window::from(15), Window::from(42)]);
         assert_eq!(container.focused_window_idx(), 1);
     }
 

@@ -2,6 +2,7 @@ use crate::border_manager::BORDER_OFFSET;
 use crate::border_manager::BORDER_WIDTH;
 use crate::border_manager::STYLE;
 use crate::container::Container;
+use crate::container::ContainerId;
 use crate::core::BorderStyle;
 use crate::core::Rect;
 use crate::core::StackbarLabel;
@@ -93,7 +94,7 @@ impl Stackbar {
         HWND(windows_api::as_ptr!(self.hwnd))
     }
 
-    pub fn create(id: &str) -> color_eyre::Result<Self> {
+    pub fn create(id: ContainerId) -> color_eyre::Result<Self> {
         let name: Vec<u16> = format!("komostackbar-{id}\0").encode_utf16().collect();
         let class_name = PCWSTR(name.as_ptr());
 

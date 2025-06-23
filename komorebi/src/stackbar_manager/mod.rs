@@ -1,6 +1,7 @@
 mod stackbar;
 
 use crate::container::Container;
+use crate::container::ContainerId;
 use crate::core::StackbarLabel;
 use crate::core::StackbarMode;
 use crate::stackbar_manager::stackbar::Stackbar;
@@ -34,9 +35,10 @@ pub static STACKBAR_MODE: AtomicCell<StackbarMode> = AtomicCell::new(StackbarMod
 pub static STACKBAR_TEMPORARILY_DISABLED: AtomicBool = AtomicBool::new(false);
 
 lazy_static! {
-    pub static ref STACKBAR_STATE: Mutex<HashMap<Arc<str>, Stackbar>> = Mutex::new(HashMap::new());
+    pub static ref STACKBAR_STATE: Mutex<HashMap<ContainerId, Stackbar>> =
+        Mutex::new(HashMap::new());
     pub static ref STACKBAR_FONT_FAMILY: Mutex<Option<String>> = Mutex::new(None);
-    static ref STACKBARS_MONITORS: Mutex<HashMap<Arc<str>, usize>> = Mutex::new(HashMap::new());
+    static ref STACKBARS_MONITORS: Mutex<HashMap<ContainerId, usize>> = Mutex::new(HashMap::new());
     static ref STACKBARS_CONTAINERS: Mutex<HashMap<isize, Container>> = Mutex::new(HashMap::new());
 }
 
@@ -116,7 +118,7 @@ pub fn handle_notifications(wm: Arc<Mutex<WindowManager>>) -> color_eyre::Result
                     for (id, border) in stackbars.iter() {
                         if stackbars_monitors.get(id).copied().unwrap_or_default() == monitor_idx {
                             border.destroy()?;
-                            to_remove.push(id.clone());
+                            to_remove.push(*id);
                         }
                     }
 
@@ -137,7 +139,7 @@ pub fn handle_notifications(wm: Arc<Mutex<WindowManager>>) -> color_eyre::Result
                     for (id, stackbar) in stackbars.iter() {
                         if stackbars_monitors.get(id).copied().unwrap_or_default() == monitor_idx {
                             stackbar.destroy()?;
-                            to_remove.push(id.clone());
+                            to_remove.push(*id);
                         }
                     }
 
@@ -149,11 +151,7 @@ pub fn handle_notifications(wm: Arc<Mutex<WindowManager>>) -> color_eyre::Result
                 }
 
                 // Destroy any stackbars not associated with the focused workspace
-                let container_ids = ws
-                    .containers()
-                    .iter()
-                    .map(|c| c.id().clone())
-                    .collect::<Vec<_>>();
+                let container_ids = ws.containers().iter().map(|c| c.id()).collect::<Vec<_>>();
 
                 let mut to_remove = vec![];
                 for (id, stackbar) in stackbars.iter() {
@@ -161,7 +159,7 @@ pub fn handle_notifications(wm: Arc<Mutex<WindowManager>>) -> color_eyre::Result
                         && !container_ids.contains(id)
                     {
                         stackbar.destroy()?;
-                        to_remove.push(id.clone());
+                        to_remove.push(*id);
                     }
                 }
 
@@ -181,17 +179,17 @@ pub fn handle_notifications(wm: Arc<Mutex<WindowManager>>) -> color_eyre::Result
                     };
 
                     if !should_add_stackbar {
-                        if let Some(stackbar) = stackbars.get(container.id()) {
+                        if let Some(stackbar) = stackbars.get(&container.id()) {
                             stackbar.destroy()?
                         }
 
-                        stackbars.remove(container.id());
-                        stackbars_monitors.remove(container.id());
+                        stackbars.remove(&container.id());
+                        stackbars_monitors.remove(&container.id());
                         continue 'containers;
                     }
 
                     // Get the stackbar entry for this container from the map or create one
-                    let stackbar = match stackbars.entry(container.id().clone()) {
+                    let stackbar = match stackbars.entry(container.id()) {
                         Entry::Occupied(entry) => entry.into_mut(),
                         Entry::Vacant(entry) => {
                             if let Ok(stackbar) = Stackbar::create(container.id()) {
@@ -202,7 +200,7 @@ pub fn handle_notifications(wm: Arc<Mutex<WindowManager>>) -> color_eyre::Result
                         }
                     };
 
-                    stackbars_monitors.insert(container.id().clone(), monitor_idx);
+                    stackbars_monitors.insert(container.id(), monitor_idx);
 
                     let rect = WindowsApi::window_rect(
                         container.focused_window().copied().unwrap_or_default().hwnd,
