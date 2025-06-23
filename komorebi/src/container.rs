@@ -27,19 +27,13 @@ pub struct Container {
 }
 
 /// Helper function to serialize the Arc<str>
-fn serialize<S>(arc: &Arc<str>, serializer: S) -> Result<S::Ok, S::Error>
-where
-    S: Serializer,
-{
-    serializer.serialize_str(arc.as_ref())
+fn serialize<S: Serializer>(arc: &Arc<str>, s: S) -> Result<S::Ok, S::Error> {
+    s.serialize_str(arc.as_ref())
 }
 
 /// Helper function to deserialize the Arc<str>
-fn deserialize<'de, D>(deserializer: D) -> Result<Arc<str>, D::Error>
-where
-    D: Deserializer<'de>,
-{
-    let s: &str = Deserialize::deserialize(deserializer)?;
+fn deserialize<'de, D: Deserializer<'de>>(d: D) -> Result<Arc<str>, D::Error> {
+    let s: &str = Deserialize::deserialize(d)?;
     Ok(Arc::from(s))
 }
 
@@ -71,12 +65,14 @@ impl Container {
         self.windows()
             .iter()
             .rev()
-            .filter(|w| omit.map_or(true, |o| o != **w))
+            .filter(|w| omit != Some(**w))
             .for_each(|w| w.hide())
     }
 
     pub fn restore(&self) {
-        self.focused_window().map(|w| w.restore());
+        if let Some(window) = self.focused_window() {
+            window.restore();
+        }
     }
 
     /// Hides the unfocused windows of the container and restores the focused one. This function

@@ -225,10 +225,8 @@ impl RenderDispatcher for MovementRenderDispatcher {
             .count_in_progress(MovementRenderDispatcher::PREFIX)
             == 0
         {
-            if let Ok(window) = WindowsApi::foreground_window() {
-                if window == self.window {
-                    focus_manager::send_notification(self.window)
-                }
+            if matches!(WindowsApi::foreground_window(), Ok(window) if window == self.window) {
+                focus_manager::send_notification(self.window)
             }
 
             stackbar_manager::STACKBAR_TEMPORARILY_DISABLED.store(false, Ordering::SeqCst);

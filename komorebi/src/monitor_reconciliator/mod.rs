@@ -402,9 +402,7 @@ where
                                 }
 
                                 if let Some(container) = workspace.monocle_container() {
-                                    for window in container.windows() {
-                                        windows_to_remove.push(*window);
-                                    }
+                                    windows_to_remove.extend(container.windows().iter().copied());
                                     if let Some(window) = container.focused_window() {
                                         // Minimize the focused window since Windows might try
                                         // to move it to another monitor if it was focused.

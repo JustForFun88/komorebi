@@ -1073,29 +1073,21 @@ impl WindowManager {
 
     #[tracing::instrument(skip(self))]
     pub fn raise_window_at_cursor_pos(&mut self) -> Result<()> {
-        let mut win = None;
-
         let workspace = self.focused_workspace()?;
         // first check the focused workspace
-        if let Some(container_idx) = workspace.container_idx_from_current_point() {
-            if let Some(container) = workspace.containers().get(container_idx) {
-                if let Some(window) = container.focused_window() {
-                    win = Some(*window);
-                }
-            }
-        }
+        let mut win = workspace
+            .container_idx_from_current_point()
+            .and_then(|container_idx| workspace.containers().get(container_idx))
+            .and_then(|container| container.focused_window().copied());
 
         // then check all workspaces
         if win.is_none() {
             for monitor in self.monitors() {
                 for ws in monitor.workspaces() {
-                    if let Some(container_idx) = ws.container_idx_from_current_point() {
-                        if let Some(container) = ws.containers().get(container_idx) {
-                            if let Some(window) = container.focused_window() {
-                                win = Some(*window);
-                            }
-                        }
-                    }
+                    win = ws
+                        .container_idx_from_current_point()
+                        .and_then(|container_idx| ws.containers().get(container_idx))
+                        .and_then(|container| container.focused_window().copied());
                 }
             }
         }

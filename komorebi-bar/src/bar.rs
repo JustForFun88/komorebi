@@ -906,7 +906,9 @@ impl eframe::App for Komobar {
                         tracing::debug!(
                             "back on komorebi's associated virtual desktop - restoring bar"
                         );
-                        self.window.map(WindowsApi::restore_window);
+                        if let Some(window) = self.window {
+                            WindowsApi::restore_window(window)
+                        };
                     }
                     NotificationEvent::VirtualDesktop(
                         VirtualDesktopNotification::LeftAssociatedVirtualDesktop,
@@ -914,7 +916,9 @@ impl eframe::App for Komobar {
                         tracing::debug!(
                             "no longer on komorebi's associated virtual desktop - minimizing bar"
                         );
-                        self.window.map(WindowsApi::minimize_window);
+                        if let Some(window) = self.window {
+                            WindowsApi::restore_window(window)
+                        }
                     }
                     _ => {}
                 }
@@ -939,9 +943,9 @@ impl eframe::App for Komobar {
 
                         // Restore the bar in case it has been minimized when the monitor
                         // disconnected
-                        self.window
-                            .filter(|w| w.is_miminized())
-                            .map(WindowsApi::restore_window);
+                        if let Some(window) = self.window.filter(|w| w.is_miminized()) {
+                            WindowsApi::restore_window(window)
+                        }
 
                         // Reset the current `work_area_offset` so that it gets recalculated and
                         // properly applied again, since if the monitor has connected for the first

@@ -248,22 +248,16 @@ pub enum SocketMessage {
     StaticConfigSchema,
     GenerateStaticConfig,
     #[serde(serialize_with = "serialize", deserialize_with = "deserialize")]
-    #[cfg_attr(feature = "schemars", schemars(with = "u64"))]
+    #[cfg_attr(feature = "schemars", schemars(with = "i64"))]
     DebugWindow(Window),
 }
 
-fn serialize<S>(window: &Window, serializer: S) -> Result<S::Ok, S::Error>
-where
-    S: Serializer,
-{
-    serializer.serialize_u64(window.hwnd().0 as u64)
+fn serialize<S: Serializer>(window: &Window, s: S) -> Result<S::Ok, S::Error> {
+    s.serialize_i64(window.hwnd().0 as i64)
 }
 
-fn deserialize<'de, D>(deserializer: D) -> Result<Window, D::Error>
-where
-    D: Deserializer<'de>,
-{
-    let raw = u64::deserialize(deserializer)?;
+fn deserialize<'de, D: Deserializer<'de>>(d: D) -> Result<Window, D::Error> {
+    let raw = i64::deserialize(d)?;
     Ok(Window::from(HWND(crate::windows_api::as_ptr!(raw))))
 }
 
