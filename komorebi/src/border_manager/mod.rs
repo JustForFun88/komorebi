@@ -1,6 +1,7 @@
 #![deny(clippy::unwrap_used, clippy::expect_used)]
 
 mod border;
+use crate::container::ContainerId;
 use crate::core::BorderImplementation;
 use crate::core::BorderStyle;
 use crate::core::WindowKind;
@@ -67,15 +68,15 @@ lazy_static! {
 #[derive(Clone, Debug, Eq, Hash, PartialEq)]
 pub enum WsElementId {
     /// Container with its string ID
-    Container(Arc<str>),
+    Container(ContainerId),
     /// Floating window with its HWND
     Window(isize),
 }
 
-impl From<&Arc<str>> for WsElementId {
+impl From<ContainerId> for WsElementId {
     #[inline]
-    fn from(id: &Arc<str>) -> Self {
-        Self::Container(id.clone())
+    fn from(id: ContainerId) -> Self {
+        Self::Container(id)
     }
 }
 
@@ -89,8 +90,8 @@ impl From<isize> for WsElementId {
 impl Display for WsElementId {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            WsElementId::Container(id) => f.write_str(id),
-            WsElementId::Window(hwnd) => write!(f, "{}", hwnd),
+            WsElementId::Container(id) => write!(f, "container-{}", id),
+            WsElementId::Window(hwnd) => write!(f, "window-{}", hwnd),
         }
     }
 }
