@@ -54,7 +54,6 @@ use komorebi_client::PathExt;
 use komorebi_client::SocketMessage;
 use komorebi_client::VirtualDesktopNotification;
 use komorebi_client::Window;
-use komorebi_client::WindowsApi;
 use komorebi_themes::catppuccin_egui;
 use komorebi_themes::Base16Value;
 use komorebi_themes::Base16Wrapper;
@@ -907,7 +906,7 @@ impl eframe::App for Komobar {
                             "back on komorebi's associated virtual desktop - restoring bar"
                         );
                         if let Some(window) = self.window {
-                            WindowsApi::restore_window(window)
+                            komorebi_client::WindowsApi::restore_window(window)
                         };
                     }
                     NotificationEvent::VirtualDesktop(
@@ -917,7 +916,7 @@ impl eframe::App for Komobar {
                             "no longer on komorebi's associated virtual desktop - minimizing bar"
                         );
                         if let Some(window) = self.window {
-                            WindowsApi::restore_window(window)
+                            komorebi_client::WindowsApi::restore_window(window)
                         }
                     }
                     _ => {}
@@ -944,7 +943,7 @@ impl eframe::App for Komobar {
                         // Restore the bar in case it has been minimized when the monitor
                         // disconnected
                         if let Some(window) = self.window.filter(|w| w.is_miminized()) {
-                            WindowsApi::restore_window(window)
+                            komorebi_client::WindowsApi::restore_window(window)
                         }
 
                         // Reset the current `work_area_offset` so that it gets recalculated and
