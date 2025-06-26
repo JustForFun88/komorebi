@@ -90,7 +90,7 @@ impl Display for WsElementId {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             WsElementId::Container(id) => f.write_str(id),
-            WsElementId::Window(hwnd) => write!(f, "{}", hwnd),
+            WsElementId::Window(window) => write!(f, "{}", window),
         }
     }
 }
@@ -455,8 +455,8 @@ pub fn handle_notifications(wm: Arc<Mutex<WindowManager>>) -> color_eyre::Result
                             };
                             border.window_kind = new_focus_state;
 
-                            // Update the borders tracking_hwnd in case it changed and remove the
-                            // old `tracking_hwnd` from `WINDOWS_BORDERS` if needed.
+                            // Update the borders tracking_window in case it changed and remove the
+                            // old `tracking_window` from `WINDOWS_BORDERS` if needed.
                             if border.tracking_window != focused_window {
                                 if let Some(previous) = windows_borders.get(&border.tracking_window)
                                 {
@@ -493,7 +493,7 @@ pub fn handle_notifications(wm: Arc<Mutex<WindowManager>>) -> color_eyre::Result
 
                             windows_borders.insert(focused_window, id);
 
-                            let border_hwnd = border.border_id;
+                            let border_id = border.border_id;
 
                             if ws.layer() == &WorkspaceLayer::Floating {
                                 handle_floating_borders(
@@ -512,7 +512,7 @@ pub fn handle_notifications(wm: Arc<Mutex<WindowManager>>) -> color_eyre::Result
                                     &mut windows_borders,
                                     monitor_idx,
                                     |_, b| {
-                                        border_hwnd != b.border_id
+                                        border_id != b.border_id
                                             && !ws
                                                 .floating_windows()
                                                 .iter()
@@ -525,17 +525,16 @@ pub fn handle_notifications(wm: Arc<Mutex<WindowManager>>) -> color_eyre::Result
                                     &mut borders,
                                     &mut windows_borders,
                                     monitor_idx,
-                                    |_, b| border_hwnd != b.border_id,
+                                    |_, b| border_id != b.border_id,
                                 )?;
                             }
                             continue 'monitors;
                         }
 
-                        let foreground_hwnd = WindowsApi::foreground_window().unwrap_or_default();
-                        let foreground_monitor_id =
-                            WindowsApi::monitor_from_window(foreground_hwnd);
+                        let foreground_win = WindowsApi::foreground_window().unwrap_or_default();
+                        let foreground_monitor_id = WindowsApi::monitor_from_window(foreground_win);
                         let is_maximized = foreground_monitor_id == m.id()
-                            && WindowsApi::is_zoomed(foreground_hwnd);
+                            && WindowsApi::is_zoomed(foreground_win);
 
                         if is_maximized {
                             // Remove all borders on this monitor
@@ -604,8 +603,8 @@ pub fn handle_notifications(wm: Arc<Mutex<WindowManager>>) -> color_eyre::Result
 
                             border.window_kind = new_focus_state;
 
-                            // Update the borders `tracking_hwnd` in case it changed and remove the
-                            // old `tracking_hwnd` from `WINDOWS_BORDERS` if needed.
+                            // Update the borders `tracking_window` in case it changed and remove the
+                            // old `tracking_window` from `WINDOWS_BORDERS` if needed.
                             if border.tracking_window != focused_window {
                                 if let Some(previous) = windows_borders.get(&border.tracking_window)
                                 {

@@ -101,11 +101,9 @@ static BRUSH_PROPERTIES: LazyLock<D2D1_BRUSH_PROPERTIES> =
 
 pub extern "system" fn border_windows(hwnd: HWND, lparam: LPARAM) -> BOOL {
     let windows = unsafe { &mut *(lparam.0 as *mut Vec<BorderId>) };
-    let window = Window::from(hwnd);
-    if let Ok(class) = WindowsApi::real_window_class_w(window) {
-        if class.starts_with("komoborder") {
-            windows.push(BorderId(window));
-        }
+    let win = Window::from(hwnd);
+    if WindowsApi::real_window_class_w(win).is_ok_and(|class| class.starts_with("komoborder")) {
+        windows.push(BorderId(win));
     }
 
     true.into()
