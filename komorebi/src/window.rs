@@ -194,7 +194,7 @@ impl MovementRenderDispatcher {
 
 impl RenderDispatcher for MovementRenderDispatcher {
     fn get_animation_key(&self) -> String {
-        let key = (self.window.hwnd().0 as usize).to_string();
+        let key = self.window.as_isize().to_string();
         new_animation_key(MovementRenderDispatcher::PREFIX, key)
     }
 
@@ -269,7 +269,7 @@ impl TransparencyRenderDispatcher {
 
 impl RenderDispatcher for TransparencyRenderDispatcher {
     fn get_animation_key(&self) -> String {
-        let key = (self.window.hwnd().0 as usize).to_string();
+        let key = self.window.as_isize().to_string();
         new_animation_key(TransparencyRenderDispatcher::PREFIX, key)
     }
 
@@ -348,6 +348,10 @@ impl AspectRatio {
 impl Window {
     pub const fn hwnd(self) -> HWND {
         HWND(windows_api::as_ptr!(self.hwnd))
+    }
+
+    pub const fn as_isize(self) -> isize {
+        self.hwnd
     }
 
     pub fn move_to_area(&mut self, current_area: &Rect, target_area: &Rect) -> Result<()> {

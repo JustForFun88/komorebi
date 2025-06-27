@@ -99,7 +99,7 @@ impl StackbarId {
 }
 
 impl Stackbar {
-    pub const fn hwnd(self) -> HWND {
+    pub const fn hwnd(&self) -> HWND {
         self.id().window().hwnd()
     }
 
@@ -203,7 +203,7 @@ impl Stackbar {
         WindowsApi::position_window(self.id().window(), &layout, false, false)?;
 
         unsafe {
-            let hdc = GetDC(Option::from(self.id().window().hwnd()));
+            let hdc = GetDC(Some(self.hwnd()));
 
             let hpen = CreatePen(PS_SOLID, 0, COLORREF(background));
             let hbrush = CreateSolidBrush(COLORREF(background));
@@ -303,7 +303,7 @@ impl Stackbar {
                 );
             }
 
-            ReleaseDC(Some(self.id().window().hwnd()), hdc);
+            ReleaseDC(Some(self.hwnd()), hdc);
             // TODO: error handling
             let _ = DeleteObject(hpen.into());
             // TODO: error handling

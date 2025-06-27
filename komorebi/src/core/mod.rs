@@ -253,7 +253,7 @@ pub enum SocketMessage {
 }
 
 fn serialize<S: Serializer>(window: &Window, s: S) -> Result<S::Ok, S::Error> {
-    s.serialize_i64(window.hwnd().0 as i64)
+    s.serialize_i64(window.as_isize() as i64)
 }
 
 fn deserialize<'de, D: Deserializer<'de>>(d: D) -> Result<Window, D::Error> {

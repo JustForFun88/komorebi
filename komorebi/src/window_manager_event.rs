@@ -104,7 +104,7 @@ impl WindowManagerEvent {
     }
 
     pub fn hwnd(self) -> isize {
-        self.window().hwnd().0 as isize
+        self.window().as_isize()
     }
 
     pub const fn title(self) -> &'static str {

@@ -110,7 +110,7 @@ pub extern "system" fn win_event_hook(
         if let Some(border_info) = border_info {
             unsafe {
                 let _ = SendNotifyMessageW(
-                    border_info.id().window().hwnd(),
+                    border_info.hwnd(),
                     event,
                     WPARAM(0),
                     LPARAM(hwnd.0 as isize),
@@ -133,7 +133,7 @@ pub extern "system" fn win_event_hook(
         None => {
             tracing::trace!(
                 "Unhandled WinEvent: {winevent} (hwnd: {}, exe: {}, title: {}, class: {})",
-                window.hwnd().0 as isize,
+                window.as_isize(),
                 window.exe().unwrap_or_default(),
                 window.title().unwrap_or_default(),
                 window.class().unwrap_or_default()

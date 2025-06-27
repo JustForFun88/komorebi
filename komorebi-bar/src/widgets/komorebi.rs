@@ -890,7 +890,7 @@ impl From<&Container> for KomorebiNotificationStateContainerInformation {
             .into_iter()
             .map(|window| {
                 ImageIcon::try_load(*window, || {
-                    windows_icons::get_icon_by_hwnd(window.hwnd().0 as isize).or_else(|| {
+                    windows_icons::get_icon_by_hwnd(window.as_isize()).or_else(|| {
                         windows_icons_fallback::get_icon_by_process_id(window.process_id())
                     })
                 })
@@ -912,7 +912,7 @@ impl From<&Container> for KomorebiNotificationStateContainerInformation {
 impl From<&Window> for KomorebiNotificationStateContainerInformation {
     fn from(value: &Window) -> Self {
         let icons = ImageIcon::try_load(*value, || {
-            windows_icons::get_icon_by_hwnd(value.hwnd().0 as isize)
+            windows_icons::get_icon_by_hwnd(value.as_isize())
                 .or_else(|| windows_icons_fallback::get_icon_by_process_id(value.process_id()))
         });
 

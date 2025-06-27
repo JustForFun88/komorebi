@@ -34,6 +34,7 @@ use std::sync::atomic::Ordering;
 use std::sync::Arc;
 use std::sync::OnceLock;
 use strum::Display;
+use windows::Win32::Foundation::HWND;
 use windows::Win32::Graphics::Direct2D::ID2D1HwndRenderTarget;
 
 pub static BORDER_WIDTH: AtomicI32 = AtomicI32::new(8);
@@ -119,7 +120,11 @@ pub struct BorderInfo {
 }
 
 impl BorderInfo {
-    pub fn id(&self) -> BorderId {
+    pub const fn hwnd(self) -> HWND {
+        self.id().window().hwnd()
+    }
+
+    pub const fn id(&self) -> BorderId {
         self.border_id
     }
 }
@@ -141,7 +146,7 @@ fn event_rx() -> Receiver<Notification> {
 pub fn window_border(window: Window) -> Option<BorderInfo> {
     let id = WINDOWS_BORDERS.lock().get(&window)?.clone();
     BORDER_STATE.lock().get(&id).map(|b| BorderInfo {
-        border_id: b.border_id,
+        border_id: b.id(),
         window_kind: b.window_kind,
     })
 }
@@ -162,7 +167,7 @@ pub fn destroy_all_borders() -> color_eyre::Result<()> {
     let mut borders = BORDER_STATE.lock();
     tracing::info!(
         "purging known borders: {:?}",
-        borders.iter().map(|b| b.1.border_id).collect::<Vec<_>>()
+        borders.iter().map(|b| b.1.id()).collect::<Vec<_>>()
     );
 
     for (_, border) in borders.drain() {
@@ -493,7 +498,7 @@ pub fn handle_notifications(wm: Arc<Mutex<WindowManager>>) -> color_eyre::Result
 
                             windows_borders.insert(focused_window, id);
 
-                            let border_id = border.border_id;
+                            let border_id = border.id();
 
                             if ws.layer() == &WorkspaceLayer::Floating {
                                 handle_floating_borders(
@@ -512,7 +517,7 @@ pub fn handle_notifications(wm: Arc<Mutex<WindowManager>>) -> color_eyre::Result
                                     &mut windows_borders,
                                     monitor_idx,
                                     |_, b| {
-                                        border_id != b.border_id
+                                        border_id != b.id()
                                             && !ws
                                                 .floating_windows()
                                                 .iter()
@@ -525,7 +530,7 @@ pub fn handle_notifications(wm: Arc<Mutex<WindowManager>>) -> color_eyre::Result
                                     &mut borders,
                                     &mut windows_borders,
                                     monitor_idx,
-                                    |_, b| border_id != b.border_id,
+                                    |_, b| border_id != b.id(),
                                 )?;
                             }
                             continue 'monitors;
@@ -615,8 +620,8 @@ pub fn handle_notifications(wm: Arc<Mutex<WindowManager>>) -> color_eyre::Result
                                     }
                                 }
                                 border.tracking_window = focused_window;
-                                if !WindowsApi::is_window_visible(border.border_id.window()) {
-                                    WindowsApi::restore_window(border.border_id.window());
+                                if !WindowsApi::is_window_visible(border.id().window()) {
+                                    WindowsApi::restore_window(border.id().window());
                                 }
                             }
 
@@ -755,7 +760,7 @@ fn remove_borders(
             // and the condition applies
             && condition(id, border)
             // and the border is visible (we don't remove hidden borders)
-            && WindowsApi::is_window_visible(border.border_id.window())
+            && WindowsApi::is_window_visible(border.id().window())
         {
             // we mark it to be removed
             to_remove.push(id.clone());

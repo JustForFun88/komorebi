@@ -163,7 +163,7 @@ impl From<BorderId> for Border {
 
 impl Border {
     pub const fn hwnd(&self) -> HWND {
-        self.border_id.window().hwnd()
+        self.id().window().hwnd()
     }
 
     pub const fn id(&self) -> BorderId {
@@ -265,7 +265,7 @@ impl Border {
 
     pub fn update_brushes(&mut self) -> color_eyre::Result<()> {
         let hwnd_render_target_properties = D2D1_HWND_RENDER_TARGET_PROPERTIES {
-            hwnd: self.border_id.window().hwnd(),
+            hwnd: self.hwnd(),
             pixelSize: Default::default(),
             presentOptions: D2D1_PRESENT_OPTIONS_IMMEDIATELY,
         };
@@ -330,7 +330,7 @@ impl Border {
     }
 
     pub fn destroy(&self) -> color_eyre::Result<()> {
-        WindowsApi::close_window(self.border_id.window())
+        WindowsApi::close_window(self.id().window())
     }
 
     pub fn set_position(&self, rect: &Rect, reference_win: Window) -> color_eyre::Result<()> {
@@ -338,7 +338,7 @@ impl Border {
         rect.add_margin(self.width);
         rect.add_padding(-self.offset);
 
-        WindowsApi::set_border_pos(self.border_id.window(), &rect, reference_win)?;
+        WindowsApi::set_border_pos(self.id().window(), &rect, reference_win)?;
 
         Ok(())
     }

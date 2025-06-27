@@ -718,7 +718,7 @@ impl WindowsApi {
         let window = Self::top_window()?;
         let mut next_window = window;
 
-        while !next_window.hwnd().0.is_null() {
+        while !next_window.hwnd().is_invalid() {
             if Self::is_window_visible(next_window) {
                 return Ok(next_window);
             }
