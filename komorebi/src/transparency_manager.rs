@@ -93,7 +93,7 @@ pub fn handle_notifications(wm: Arc<Mutex<WindowManager>>) -> color_eyre::Result
                 // Only operate on the focused workspace of each monitor
                 // Workspaces with tiling disabled don't have transparent windows
                 if !ws.tile() || workspace_idx != focused_workspace_idx {
-                    for window in ws.visible_windows().iter().flatten() {
+                    for window in ws.visible_windows() {
                         if let Err(error) = window.opaque() {
                             tracing::error!("failed to make {window:?} opaque: {error}")
                         }

@@ -219,16 +219,6 @@ impl<T> ProcessWindowsCrateResult<T> for WindowsCrateResult<T> {
     }
 }
 
-// impl ProcessWindowsCrateResult<HWND> for HWND {
-//     fn process(self) -> Result<HWND> {
-//         if self == HWND(std::ptr::null_mut()) {
-//             Err(std::io::Error::last_os_error().into())
-//         } else {
-//             Ok(self)
-//         }
-//     }
-// }
-
 impl ProcessWindowsCrateResult<Window> for HWND {
     fn process(self) -> Result<Window> {
         if self == HWND(std::ptr::null_mut()) {
@@ -437,8 +427,8 @@ impl WindowsApi {
                     }
                 }
 
-                for hwnd in windows_on_other_monitors {
-                    workspace.remove_window(hwnd)?;
+                for window in windows_on_other_monitors {
+                    workspace.remove_window(window)?;
                 }
             }
         }

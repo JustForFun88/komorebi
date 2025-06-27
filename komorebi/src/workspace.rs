@@ -275,21 +275,11 @@ impl Workspace {
     }
 
     pub fn hide(&mut self, omit: Option<Window>) {
-        for window in self.floating_windows_mut().iter_mut().rev() {
-            let mut should_hide = omit.is_none();
-
-            if !should_hide {
-                if let Some(omit) = omit {
-                    if omit != *window {
-                        should_hide = true
-                    }
-                }
-            }
-
-            if should_hide {
-                window.hide();
-            }
-        }
+        self.floating_windows()
+            .iter()
+            .rev()
+            .filter(|&&window| Some(window) != omit)
+            .for_each(|window| window.hide());
 
         for container in self.containers_mut() {
             container.hide(omit)
@@ -919,14 +909,9 @@ impl Workspace {
     }
 
     pub fn container_idx_for_window(&self, window: Window) -> Option<usize> {
-        let mut idx = None;
-        for (i, x) in self.containers().iter().enumerate() {
-            if x.contains_window(window) {
-                idx = Option::from(i);
-            }
-        }
-
-        idx
+        self.containers()
+            .iter()
+            .position(|x| x.contains_window(window))
     }
 
     pub fn remove_window(&mut self, window: Window) -> Result<()> {
@@ -956,13 +941,11 @@ impl Workspace {
             }
         }
 
-        if let Some(win) = self.maximized_window() {
-            if *win == window {
-                win.unmaximize();
-                self.set_maximized_window(None);
-                self.set_maximized_window_restore_idx(None);
-                return Ok(());
-            }
+        if let Some(win) = self.maximized_window().filter(|&w| w == window) {
+            win.unmaximize();
+            self.set_maximized_window(None);
+            self.set_maximized_window_restore_idx(None);
+            return Ok(());
         }
 
         let container_idx = self
@@ -1625,44 +1608,24 @@ impl Workspace {
 
     pub fn remove_focused_floating_window(&mut self) -> Option<Window> {
         let win = WindowsApi::foreground_window().ok()?;
-
-        let mut idx = None;
-        for (i, window) in self.floating_windows().iter().enumerate() {
-            if win == *window {
-                idx = Option::from(i);
-            }
-        }
-
-        match idx {
-            None => None,
-            Some(idx) => {
-                if self.floating_windows().get(idx).is_some() {
-                    self.floating_windows_mut().remove(idx)
-                } else {
-                    None
-                }
-            }
-        }
+        let idx = self.floating_windows().iter().position(|&w| w == win)?;
+        self.floating_windows_mut().remove(idx)
     }
 
-    pub fn visible_windows(&self) -> Vec<Option<&Window>> {
-        let mut vec = vec![];
+    pub fn visible_windows(&self) -> impl Iterator<Item = &Window> + '_ {
+        let maximized = self.maximized_window().iter();
 
-        vec.push(self.maximized_window().as_ref());
+        let monocle = self
+            .monocle_container()
+            .as_ref()
+            .and_then(|m| m.focused_window())
+            .into_iter();
 
-        if let Some(monocle) = self.monocle_container() {
-            vec.push(monocle.focused_window());
-        }
+        let containers = self.containers().iter().filter_map(|c| c.focused_window());
 
-        for container in self.containers() {
-            vec.push(container.focused_window());
-        }
+        let floating = self.floating_windows().iter();
 
-        for window in self.floating_windows() {
-            vec.push(Some(window));
-        }
-
-        vec
+        maximized.chain(monocle).chain(containers).chain(floating)
     }
 
     pub fn visible_window_details(&self) -> Vec<WindowDetails> {
@@ -2471,10 +2434,9 @@ mod tests {
 
         {
             // visible_windows should return None and 100
-            let visible_windows = workspace.visible_windows();
-            assert_eq!(visible_windows.len(), 2);
-            assert!(visible_windows[0].is_none());
-            assert_eq!(*visible_windows[1].unwrap(), Window::from(100));
+            let visible_windows = workspace.visible_windows().collect::<Vec<_>>();
+            assert_eq!(visible_windows.len(), 1);
+            assert_eq!(visible_windows, [&Window::from(100)]);
         }
 
         {
@@ -2486,11 +2448,9 @@ mod tests {
 
         {
             // visible_windows should return None, 100, and 300
-            let visible_windows = workspace.visible_windows();
-            assert_eq!(visible_windows.len(), 3);
-            assert!(visible_windows[0].is_none());
-            assert_eq!(*visible_windows[1].unwrap(), Window::from(100));
-            assert_eq!(*visible_windows[2].unwrap(), Window::from(300));
+            let visible_windows = workspace.visible_windows().collect::<Vec<_>>();
+            assert_eq!(visible_windows.len(), 2);
+            assert_eq!(visible_windows, [&Window::from(100), &Window::from(300)]);
         }
 
         // Maximize window 200
@@ -2498,11 +2458,12 @@ mod tests {
 
         {
             // visible_windows should return 200, 100, and 300
-            let visible_windows = workspace.visible_windows();
+            let visible_windows = workspace.visible_windows().collect::<Vec<_>>();
             assert_eq!(visible_windows.len(), 3);
-            assert_eq!(*visible_windows[0].unwrap(), Window::from(200));
-            assert_eq!(*visible_windows[1].unwrap(), Window::from(100));
-            assert_eq!(*visible_windows[2].unwrap(), Window::from(300));
+            assert_eq!(
+                visible_windows,
+                [&Window::from(200), &Window::from(100), &Window::from(300)]
+            );
         }
     }
 }

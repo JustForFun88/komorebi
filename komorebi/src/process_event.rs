@@ -85,17 +85,11 @@ impl WindowManager {
                     for w in m.workspaces() {
                         let event_win = event.window();
 
-                        let visible_wins = w
-                            .visible_windows()
-                            .iter()
-                            .flatten()
-                            .map(|w| **w)
-                            .collect::<Vec<_>>();
+                        let is_visible = w.visible_windows().any(|&win| win == event_win);
 
                         let contains_managed_window = w.contains_managed_window(event_win);
 
-                        // this is for an old stackbar clicking fix
-                        if contains_managed_window && !visible_wins.contains(&event_win) {
+                        if contains_managed_window && !is_visible {
                             transparency_override = true;
                         }
 

@@ -860,7 +860,7 @@ impl WindowManager {
             for (i, monitor) in self.monitors().iter().enumerate() {
                 for (j, workspace) in monitor.workspaces().iter().enumerate() {
                     // And all the visible windows (at the top of a container)
-                    for window in workspace.visible_windows().into_iter().flatten() {
+                    for window in workspace.visible_windows() {
                         let mut already_moved_windows = self.already_moved_windows.lock();
 
                         if let (Ok(exe_name), Ok(title), Ok(class), Ok(path)) =
