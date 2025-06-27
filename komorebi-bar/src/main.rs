@@ -94,7 +94,7 @@ fn process_hwnd() -> Option<HWND> {
             LPARAM(&mut hwnd as *mut HWND as isize),
         );
 
-        if hwnd.0.is_null() {
+        if hwnd.is_invalid() {
             None
         } else {
             Some(hwnd)
