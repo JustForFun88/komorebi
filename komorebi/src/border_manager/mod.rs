@@ -346,7 +346,7 @@ pub fn handle_notifications(wm: Arc<Mutex<WindowManager>>) -> color_eyre::Result
 
                         // when we switch focus to/from a floating window
                         let switch_focus_to_from_floating_window =
-                            floating_windows.iter().any(|fw: &Window| {
+                            floating_windows.iter().any(|fw| {
                                 // if we switch focus to a floating window
                                 fw == &notification_window.unwrap_or_default() ||
                         // if there is any floating window with a `WindowKind::Floating` border
@@ -551,10 +551,8 @@ pub fn handle_notifications(wm: Arc<Mutex<WindowManager>>) -> color_eyre::Result
                         // Collect focused workspace container and floating windows ID's
                         let mut container_and_floating_window_ids: Vec<WsElementId> =
                             ws.containers().iter().map(|c| c.id().into()).collect();
-
-                        for w in ws.floating_windows() {
-                            container_and_floating_window_ids.push((*w).into());
-                        }
+                        container_and_floating_window_ids
+                            .extend(ws.floating_windows().iter().copied().map(WsElementId::from));
 
                         // Remove any borders not associated with the focused workspace
                         remove_borders(

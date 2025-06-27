@@ -319,10 +319,8 @@ impl WindowManager {
 
                 match floating_window_idx {
                     None => {
-                        if let Some(w) = workspace.maximized_window() {
-                            if *w == window {
-                                return Ok(());
-                            }
+                        if workspace.maximized_window().is_some_and(|w| w == window) {
+                            return Ok(());
                         }
 
                         if let Some(monocle) = workspace.monocle_container() {
@@ -838,7 +836,7 @@ impl WindowManager {
                     if let Some(monocle_with_window) = target_workspace
                         .monocle_container()
                         .as_ref()
-                        .and_then(|m| m.contains_window(window).then_some(m))
+                        .filter(|m| m.contains_window(window))
                     {
                         if monocle_with_window.focused_window() != Some(&window) {
                             tracing::debug!("Needs reconciliation within a monocled stack");

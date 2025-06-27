@@ -916,7 +916,7 @@ impl eframe::App for Komobar {
                             "no longer on komorebi's associated virtual desktop - minimizing bar"
                         );
                         if let Some(window) = self.window {
-                            komorebi_client::WindowsApi::restore_window(window)
+                            komorebi_client::WindowsApi::minimize_window(window)
                         }
                     }
                     _ => {}

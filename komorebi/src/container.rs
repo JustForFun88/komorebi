@@ -65,8 +65,8 @@ impl Container {
         self.windows()
             .iter()
             .rev()
-            .filter(|w| omit != Some(**w))
-            .for_each(|w| w.hide())
+            .filter(|&&window| Some(window) != omit)
+            .for_each(|window| window.hide())
     }
 
     pub fn restore(&self) {
